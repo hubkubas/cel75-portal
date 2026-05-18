@@ -41,10 +41,12 @@ build/Release
 # Dependency directories
 node_modules/
 jspm_packages/
+.next/
+.env.local
 
-# lokalne
-credentials.json
-src/credentials.json
+# # lokalne
+# credentials.json
+# src/credentials.json
 
 
 # Snowpack dependency directory (https://snowpack.dev/)
