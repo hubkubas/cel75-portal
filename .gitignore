@@ -42,6 +42,11 @@ build/Release
 node_modules/
 jspm_packages/
 
+# lokalne
+credentials.json
+src/credentials.json
+
+
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
 
@@ -134,4 +139,3 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
-credentials.json
