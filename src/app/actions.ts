@@ -1,292 +1,351 @@
-// src/app/actions.ts
 'use server';
 
 import { supabase } from '@/lib/supabase';
 import { revalidatePath } from 'next/cache';
 
-// Pomocnicza funkcja do pobierania lokalnej daty (YYYY-MM-DD)
-function getLocalDateString() {
-  const tzoffset = (new Date()).getTimezoneOffset() * 60000;
-  return (new Date(Date.now() - tzoffset)).toISOString().slice(0, 10);
+// ==========================================
+// TYPY I PROMPTY SYSTEMOWE
+// ==========================================
+
+export interface Message {
+  id?: number;
+  rola: 'user' | 'model';
+  tresc: string;
+  obrazek_base64?: string;
+  created_at?: string;
 }
 
-// -----------------------------------------------------------------------------
-// OFICJALNY PROFIL I CHARAKTER TRENERA (SYSTEM PROMPT DLA GEMINI)
-// -----------------------------------------------------------------------------
-const ATHLETE_PROFILE = `
-Jesteś profesjonalnym, wymagającym, pełnym pasji i niezwykle motywującym trenerem kolarstwa oraz Dyrektorem Sportowym Huberta. Twoje alter ego to "Wóz techniczny" oraz "Dyrektor Sportowy". Analizujesz jego parametry życiowe i treningowe na podstawie poniższego profilu:
+const SYSTEM_INSTRUCTION = `
+Hubert to 55-letni kolarz Masters, który przeszedł redukcję z 82 kg do wyścigowych 74 kg (strefa buforowa 74-77 kg). Trenuje na Giant Revolt Adv 3 (Strefa 2 to tętno 105-115 bpm, wysoka kadencja 90+ RPM). Wychodzi z bezsenności (sen ponad 6h, protokół wieczorny: magnez + melatonina + miód).
 
-PROFIL ZAWODNIKA I SUKCES REDUKCYJNY:
-Hubert to 55-letni kolarz-amator (kategoria Masters). Zredukował wagę z 82 kg do wyścigowych 74 kg (utrzymując BMI poniżej 23 i chroniąc masę mięśniową przed sarkopenią). Obecnie znajduje się w Fazie Utrzymania (Strefa buforowa: 74-77 kg). Dieta: „Fuel for the Work Required”. W dni wolne i tlenowe stosuje Strict Low Carb (chude białka: drób, twaróg, tuńczyk, WPI na wodzie + góry warzyw + limitowane zdrowe tłuszcze). W dni mocnych treningów ładuje węglowodany (ryż/makaron) w oknie potreningowym (zero tłuszczu). Restrykcje: całkowita nietolerancja na płynne żółtko (jajka tylko na twardo). Zakaz jedzenia wieprzowiny i tłuszczów nasyconych. Wieczorna strategia: Sleep Low (białkowa kolacja bez węglowodanów).
-
-TRENING KOLARSKI I OPOROWY:
-Sprzęt: karbonowy Giant Revolt Adv 3, pulsometr na klatce, trenażer Smart na zimę. Baza tlenowa w Strefie 2 (105-115 bpm, wysoka kadencja 90+ RPM). Cel: VO2 Max, starty w wyścigach amatorskich (Gran Fondo). Wykonuje trening core (Deska 3x45s). Zadanie: wprowadzanie 1-2 razy w tygodniu 30-minutowego obwodowego treningu oporowego na górne partie (sztanga, hantle, ławka, gumy), aby wzmocnić kolarski gorset bez budowania zbędnej masy.
-
-REGENERACJA, SEN I TELEMETRIA (KLUCZOWE!):
-Hubert codziennie rano raportuje dane z Garmina (Waga, HRV, Body Battery, Sen - oceniany punktowo w skali 0-100). Wychodzi z wieloletniej bezsenności i wydłużył sen z 3 do ponad 6 godzin, stale monitorując jakość snu. Aby zapobiegać wybudzeniom o 4:00 rano (wyrzut kortyzolu), stosuje Protokół Wieczorny: 400 mg Magnezu + 1 mg Melatoniny + 1-2 małe płaskie łyżeczki miodu (miód pomijamy tylko w dni, gdy zjadł dużo węglowodanów, np. pizzę). Przy spadkach energii lub fałszywym głodzie stosuje "Ratunek Solny" (woda, sól, cytryna), a na problemy z perystaltyką jelit pije napar z siemienia lnianego.
-
-STYL ODPOWIEDZI (KLUCZOWY):
-Twoje analizy muszą być niezwykle szczegółowe, długie, rozbudowane, pełne kolarskiego żargonu, humoru i pasji. Używaj emotikonów (kolarze, rowery, wóz techniczny, owoce, jedzenie).
-W analizie raportu porannego zawsze stosuj stały podział na sekcje:
-1. Meldunek powitalny z motywującym okrzykiem trenerskim (np. "Wóz techniczny przyjmuje meldunek! Niedzielna odprawa Egzaminatora!").
-2. Analiza wagi i sukcesu redukcyjnego w strefie buforowej (z entuzjazmem, np. "WAGA 74,9 KG – ZABETONOWANA!").
-3. Szczegółowa analiza telemetrii (Body Battery, jakość snu w skali 0-100, HRV z uwzględnieniem kontekstu dnia, zmęczenia pracą i protokołu wieczornego).
-4. PLAN NA DZIŚ (Zarządzanie kryzysem / treningiem / regeneracją).
-5. PALIWO NA DZIŚ (Szczegółowe menu: śniadanie, obiad, ratunek solny, kolacja - dopasowane do tego, czy Hubert ma dziś trening, czy rest day).
-6. WIECZORNY PROTOKÓW REGENERACYJNY (magnez, melatonina, miód).
-7. ZLECENIE TRENINGOWE NA DZIŚ - Jeśli Hubert zadeklarował dostępny czas (np. 60 minut), ułóż dla niego dokładny trening kolarski w Strefie 2 (Fat Max, tętno 105-115 bpm) lub Rest Day, dopasowany do jego dzisiejszego czasu i poziomu energii.
+Styl Analiz: Generuj długie, szczegółowe, pełne pasji, humoru i kolarskich emotikonów odprawy jako „Dyrektor Sportowy / Wóz Techniczny”. Zachowuj się jak doświadczony, zaangażowany i lekko wymagający trener kolarstwa, który doskonale zna profil Huberta i wspiera go w jego drodze.
+Jeśli użytkownik prześle zdjęcie (np. menu z restauracji, posiłek lub cokolwiek innego), dokładnie je przeanalizuj, odnieś się do diety kolarza Masters i wskaż najlepsze opcje żywieniowe dla Huberta.
 `;
 
-// -----------------------------------------------------------------------------
-// INTEGRACJA Z GOOGLE GEMINI API
-// -----------------------------------------------------------------------------
-async function sendToGeminiAI(prompt: string): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY?.trim().replace(/"/g, '');
+// ==========================================
+// SEKCJA 1: RAPORTY PORANNE & STATYSTYKI (DLA PAGE.TSX)
+// ==========================================
 
-  if (!apiKey) {
-    console.warn('Brak klucza GEMINI_API_KEY w pliku .env.local.');
-    return 'Analiza AI: Brak skonfigurowanego klucza Google Gemini w .env.local.';
+// Pobiera raport poranny na dzisiejszy dzień
+export async function getTodayMorningReport(): Promise<any | null> {
+  const dzis = new Date().toISOString().substring(0, 10);
+  const { data, error } = await supabase
+    .from('poranki')
+    .select('*')
+    .eq('data', dzis)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Błąd getTodayMorningReport:", error);
+    return null;
+  }
+  return data;
+}
+
+// Zapisuje raport poranny przychodzący z formularza HTML (FormData) i generuje analizę
+// Zaktualizowana, w pełni zgodna z React Form Action wersja saveMorningReport w src/app/actions.ts
+
+export async function saveMorningReport(formData: FormData): Promise<void> {
+  const dzis = new Date().toISOString().substring(0, 10);
+
+  // Sprawdzamy czy raport na dziś już istnieje
+  const { data: existing } = await supabase
+    .from('poranki')
+    .select('id')
+    .eq('data', dzis)
+    .single();
+
+  if (existing) {
+    console.warn("Raport na dziś został już wysłany.");
+    return;
   }
 
+  // Bezpieczne wyciąganie wartości z obiektu FormData
+  const waga = parseFloat(formData.get('waga') as string) || 0;
+  const hrv = parseInt(formData.get('hrv') as string, 10) || 0;
+  const body_battery = parseInt(formData.get('body_battery') as string, 10) || 0;
+  const jakosc_snu = parseInt(formData.get('jakosc_snu') as string, 10) || 0;
+  const czas_na_trening = parseInt(formData.get('czas_na_trening') as string, 10) || 0;
+  const notatki = (formData.get('notatki') as string) || '';
+
+  let aiAnaliza = "";
   try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (apiKey) {
+      const prompt = `Przeanalizuj dzisiejszy poranek Huberta:
+      Waga: ${waga} kg
+      HRV: ${hrv} ms
+      Body Battery: ${body_battery}
+      Jakość snu: ${jakosc_snu}/100
+      Czas na trening dzisiaj: ${czas_na_trening} minut
+      Notatki Huberta: ${notatki || 'brak'}
+      
+      Przygotuj długą, pełną pasji i kolarskich emotikonów odprawę od Trenera z Wozu Technicznego, w tym zarys menu (diety) oraz precyzyjne zlecenie treningowe na dzisiejsze ${czas_na_trening} minut.`;
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+            contents: [{ role: "user", parts: [{ text: prompt }] }]
+          })
+        }
+      );
+
+      if (response.ok) {
+        const resData = await response.json() as any;
+        aiAnaliza = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      }
+    }
+  } catch (err) {
+    console.error("Błąd generowania analizy porannej przez Gemini:", err);
+  }
+
+  const { error } = await supabase
+    .from('poranki')
+    .insert([{
+      data: dzis,
+      waga,
+      hrv,
+      body_battery,
+      jakosc_snu,
+      czas_na_trening,
+      notatki: notatki || null,
+      ai_analiza: aiAnaliza || null
+    }]);
+
+  if (error) {
+    console.error("Błąd zapisu poranka:", error);
+    return;
+  }
+
+  revalidatePath('/');
+}
+
+// Pobiera średnie i zagregowane statystyki do wyświetlenia na pulpicie (w angielskim nazewnictwie camelCase)
+export async function getDashboardStats(): Promise<{
+  avgWeight: number;
+  avgHrv: number;
+  avgSleep: number;
+  totalWorkouts: number;
+  totalKm: number;
+  avgHr: number;
+  avgCadence: number;
+  // Fallback po polsku w razie potrzeby
+  srednia_waga: number;
+  sredni_hrv: number;
+  srednia_jakosc_snu: number;
+  suma_dystans: number;
+  suma_czas_minuty: number;
+}> {
+  const { data: poranki, error: pError } = await supabase
+    .from('poranki')
+    .select('waga, hrv, body_battery, jakosc_snu')
+    .order('data', { ascending: false })
+    .limit(7);
+
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
+  const { data: treningi, error: tError } = await supabase
+    .from('treningi')
+    .select('dystans, czas_minuty, tetno_srednie, kadencja_srednia')
+    .gte('data', thirtyDaysAgo);
+
+  if (pError || tError) {
+    console.error("Błąd getDashboardStats:", pError || tError);
+    return {
+      avgWeight: 0,
+      avgHrv: 0,
+      avgSleep: 0,
+      totalWorkouts: 0,
+      totalKm: 0,
+      avgHr: 0,
+      avgCadence: 0,
+      srednia_waga: 0,
+      sredni_hrv: 0,
+      srednia_jakosc_snu: 0,
+      suma_dystans: 0,
+      suma_czas_minuty: 0,
+    };
+  }
+
+  // Średnie z poranków
+  const avgWeight = poranki && poranki.length > 0
+    ? poranki.reduce((acc: number, p: any) => acc + Number(p.waga || 0), 0) / poranki.length
+    : 0;
+
+  const avgHrv = poranki && poranki.length > 0
+    ? poranki.reduce((acc: number, p: any) => acc + Number(p.hrv || 0), 0) / poranki.length
+    : 0;
+
+  const avgSleep = poranki && poranki.length > 0
+    ? poranki.reduce((acc: number, p: any) => acc + Number(p.jakosc_snu || 0), 0) / poranki.length
+    : 0;
+
+  // Statystyki treningowe (ostatnie 30 dni)
+  const totalWorkouts = treningi ? treningi.length : 0;
+
+  const totalKm = treningi
+    ? treningi.reduce((acc: number, t: any) => acc + Number(t.dystans || 0), 0)
+    : 0;
+
+  const workoutsWithHr = treningi ? treningi.filter((t: any) => t.tetno_srednie) : [];
+  const avgHr = workoutsWithHr.length > 0
+    ? workoutsWithHr.reduce((acc: number, t: any) => acc + Number(t.tetno_srednie), 0) / workoutsWithHr.length
+    : 0;
+
+  const workoutsWithCadence = treningi ? treningi.filter((t: any) => t.kadencja_srednia) : [];
+  const avgCadence = workoutsWithCadence.length > 0
+    ? workoutsWithCadence.reduce((acc: number, t: any) => acc + Number(t.kadencja_srednia), 0) / workoutsWithCadence.length
+    : 0;
+
+  return {
+    // Angielskie klucze (oczekiwane przez błędy w page.tsx)
+    avgWeight: parseFloat(avgWeight.toFixed(1)),
+    avgHrv: Math.round(avgHrv),
+    avgSleep: Math.round(avgSleep),
+    totalWorkouts,
+    totalKm: parseFloat(totalKm.toFixed(1)),
+    avgHr: Math.round(avgHr),
+    avgCadence: Math.round(avgCadence),
+
+    // Polskie klucze (zgodność wsteczna)
+    srednia_waga: parseFloat(avgWeight.toFixed(1)),
+    sredni_hrv: Math.round(avgHrv),
+    srednia_jakosc_snu: Math.round(avgSleep),
+    suma_dystans: parseFloat(totalKm.toFixed(1)),
+    suma_czas_minuty: treningi ? treningi.reduce((acc: number, t: any) => acc + Number(t.czas_minuty || 0), 0) : 0
+  };
+}
+
+// Pobiera ostatnią analizę poranka i ostatnią analizę treningu jako jeden obiekt z dwoma polami
+export async function getLatestAnalyses(): Promise<{
+  morningAnalysis: string | null;
+  workoutAnalysis: string | null;
+}> {
+  const { data: poranek } = await supabase
+    .from('poranki')
+    .select('ai_analiza')
+    .not('ai_analiza', 'is', null)
+    .order('data', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { data: trening } = await supabase
+    .from('treningi')
+    .select('ai_analiza')
+    .not('ai_analiza', 'is', null)
+    .order('data', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return {
+    morningAnalysis: poranek?.ai_analiza || null,
+    workoutAnalysis: trening?.ai_analiza || null
+  };
+}
+
+// ==========================================
+// SEKCJA 2: TRENINGI ZE STRAVY & ANALIZA AI (DLA PAGE.TSX)
+// ==========================================
+
+// Pobiera pojedynczy trening, który nie został jeszcze oceniony przez AI
+export async function getUnsentWorkout(): Promise<any | null> {
+  const { data, error } = await supabase
+    .from('treningi')
+    .select('*')
+    .eq('wyslano', false)
+    .order('data', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Błąd getUnsentWorkout:", error);
+    return null;
+  }
+  return data;
+}
+
+// Analizuje niewysłany trening za pomocą Gemini, zapisuje analizę i oznacza jako wysłany
+export async function sendWorkoutToAI(trainingId: number): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { data: training, error: fetchError } = await supabase
+      .from('treningi')
+      .select('*')
+      .eq('id', trainingId)
+      .single();
+
+    if (fetchError || !training) {
+      throw new Error("Nie znaleziono wybranego treningu do analizy.");
+    }
+
+    const tr = training as any;
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("Brak klucza API Gemini (GEMINI_API_KEY) w środowisku.");
+    }
+
+    const prompt = `Przeanalizuj dzisiejszy trening Huberta:
+    Rodzaj: ${tr.rodzaj}
+    Dystans: ${tr.dystans ? tr.dystans + ' km' : 'nie dotyczy'}
+    Czas trwania: ${tr.czas_minuty} minut
+    Średnie tętno: ${tr.tetno_srednie ? tr.tetno_srednie + ' bpm' : 'brak danych'}
+    Maksymalne tętno: ${tr.tetno_max ? tr.tetno_max + ' bpm' : 'brak danych'}
+    Średnia kadencja: ${tr.kadencja_srednia ? tr.kadencja_srednia + ' RPM' : 'brak danych'}
+    
+    Oceń ten trening z pasją, wiedzą szkoleniową i kolarskim humorem jako „Dyrektor Sportowy / Wóz Techniczny”. Odnieś średnie tętno do strefy 2 Huberta (105-115 bpm) oraz zwróć uwagę na kadencję (wysoka 90+ RPM).`;
+
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          systemInstruction: { parts: [{ text: ATHLETE_PROFILE }] },
-          contents: [{ parts: [{ text: prompt }] }]
+          systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+          contents: [{ role: "user", parts: [{ text: prompt }] }]
         })
       }
     );
 
     if (!response.ok) {
-      throw new Error(`Błąd API Gemini: ${response.statusText}`);
+      const errText = await response.text();
+      throw new Error(`Błąd API Gemini: ${response.status} - ${errText}`);
     }
 
-    const data = await response.json();
-    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    return reply || 'Nie udało się uzyskać odpowiedzi z Gemini AI.';
-  } catch (error: any) {
-    console.warn(`Problem z Gemini: ${error?.message || error}`);
-    return 'Wystąpił błąd podczas generowania analizy przez Gemini.';
-  }
-}
+    const resData = await response.json() as any;
+    const aiAnaliza = resData.candidates?.[0]?.content?.parts?.[0]?.text || "Brak analizy.";
 
-// -----------------------------------------------------------------------------
-// 1. OBSŁUGA RAPORTÓW PORANNYCH
-// -----------------------------------------------------------------------------
-
-export async function getTodayMorningReport() {
-  if (!supabase) {
-    return { dbError: 'Brak aktywnego połączenia z bazą danych Supabase. Sprawdź konfigurację zmiennych w panelu Vercel (Settings -> Environment Variables).' };
-  }
-  try {
-    const todayStr = getLocalDateString();
-    const { data, error } = await supabase
-      .from('poranki')
-      .select('*')
-      .eq('data', todayStr)
-      .maybeSingle();
-
-    if (error) {
-      console.warn(`DIAGNOSTYKA PORANKI -> WIADOMOŚĆ: "${error.message}" | KOD: "${error.code}"`);
-      return null;
-    }
-    return data;
-  } catch (err: any) {
-    console.warn(`Nieoczekiwany błąd poranków: ${err?.message || err}`);
-    return null;
-  }
-}
-
-export async function saveMorningReport(formData: FormData): Promise<void> {
-  if (!supabase) return;
-  try {
-    const todayStr = getLocalDateString();
-
-    const waga = parseFloat(formData.get('waga') as string) || null;
-    const hrv = parseInt(formData.get('hrv') as string, 10) || null;
-    const bodyBattery = parseInt(formData.get('body_battery') as string, 10) || null;
-    const jakoscSnu = parseInt(formData.get('jakosc_snu') as string, 10) || null;
-    const czasNaTrening = parseInt(formData.get('czas_na_trening') as string, 10) || null;
-    const notatki = formData.get('notatki') as string || '';
-
-    const { data: insertedData, error } = await supabase
-      .from('poranki')
-      .insert([
-        {
-          data: todayStr,
-          waga,
-          hrv,
-          body_battery: bodyBattery,
-          jakosc_snu: jakoscSnu,
-          czas_na_trening: czasNaTrening,
-          notatki
-        }
-      ])
-      .select()
-      .single();
-
-    // STRAŻNIK TYPÓW (Type Guard): Jeśli wystąpił błąd lub nie ma danych, zatrzymujemy akcję
-    if (error || !insertedData) {
-      if (error?.code === '23505') {
-        console.warn('Raport na dzisiejszy dzień został już zapisany.');
-        return;
-      }
-      console.warn(`Błąd zapisu poranka: ${error?.message || 'Nieznany błąd bazy'}`);
-      return;
-    }
-
-    // Teraz kompilator wie, że insertedData na 100% istnieje i ma prawidłowy typ
-    const prompt = `Raport Poranny z Garmin: Waga: ${waga}kg, HRV: ${hrv}, Body Battery: ${bodyBattery}%, Jakość snu (skala 0-100): ${jakoscSnu}/100. Dostępny czas Huberta na trening rowerowy dzisiaj: ${czasNaTrening ? `${czasNaTrening} minut` : 'Brak czasu/brak określenia'}. Notatki zawodnika: "${notatki}". Przygotuj dla niego pełną, rozbudowaną, niezwykle szczegółową odprawę trenerską w swoim unikalnym stylu Dyrektora Sportowego (Meldunek, Analiza wagi, Telemetria, Plan na dziś, Paliwo na dziś, Protokół wieczorny, Zlecenie treningowe na dziś na podstawie zadeklarowanego czasu).`;
-    const aiAnalysis = await sendToGeminiAI(prompt);
-
-    await supabase
-      .from('poranki')
-      .update({ ai_analiza: aiAnalysis })
-      .eq('id', insertedData.id);
-
-    revalidatePath('/');
-  } catch (err) {
-    console.warn('Błąd serwera przy zapisie poranka:', err);
-  }
-}
-
-// -----------------------------------------------------------------------------
-// 2. OBSŁUGA TRENINGÓW
-// -----------------------------------------------------------------------------
-
-export async function getUnsentWorkout() {
-  if (!supabase) return null;
-  try {
-    const { data, error } = await supabase
-      .from('treningi')
-      .select('*')
-      .eq('wyslano', false)
-      .order('data', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      console.warn(`DIAGNOSTYKA TRENINGI -> WIADOMOŚĆ: "${error.message}" | KOD: "${error.code}"`);
-      return null;
-    }
-    return data;
-  } catch (err: any) {
-    console.warn(`Nieoczekiwany błąd treningów: ${err?.message || err}`);
-    return null;
-  }
-}
-
-export async function sendWorkoutToAI(workoutId: number) {
-  if (!supabase) return { success: false, error: 'Brak połączenia z bazą.' };
-  try {
-    const { data: workout, error } = await supabase
-      .from('treningi')
-      .select('*')
-      .eq('id', workoutId)
-      .single();
-
-    // STRAŻNIK TYPÓW (Type Guard): Bezpieczeństwo przed wartością null
-    if (error || !workout) {
-      return { success: false, error: 'Nie znaleziono treningu.' };
-    }
-
-    const prompt = `Oceń ostatni trening kolarza: Rodzaj: ${workout.rodzaj}, Dystans: ${workout.dystans}km, Czas trwania: ${workout.czas_minuty}min, Średnie tętno: ${workout.tetno_srednie || 'N/A'} bpm, Maksymalne tętno: ${workout.tetno_max || 'N/A'} bpm, Średnia kadencja: ${workout.kadencja_srednia || 'N/A'}. Przygotuj niezwykle szczegółową i motywującą odprawę "ZLECENIE TRENINGOWE" w swoim stylu trenerskim Dyrektora Sportowego.`;
-    const aiAnalysis = await sendToGeminiAI(prompt);
-
-    await supabase
+    const { error: updateError } = await supabase
       .from('treningi')
       .update({
-        wyslano: true,
-        ai_analiza: aiAnalysis
+        ai_analiza: aiAnaliza,
+        wyslano: true
       })
-      .eq('id', workoutId);
+      .eq('id', trainingId);
+
+    if (updateError) {
+      throw updateError;
+    }
 
     revalidatePath('/');
     return { success: true };
-  } catch (err) {
-    console.warn('Błąd wysyłki treningu:', err);
-    return { success: false, error: 'Błąd wysyłki treningu do AI.' };
+  } catch (err: any) {
+    console.error("Błąd sendWorkoutToAI:", err);
+    return { success: false, error: err.message || "Wystąpił błąd podczas analizy treningu." };
   }
 }
 
-// -----------------------------------------------------------------------------
-// 3. STATYSTYKI DASHBOARDU ORAZ OSTATNIE ANALIZY
-// -----------------------------------------------------------------------------
-
-export async function getDashboardStats() {
-  if (!supabase) return { totalWorkouts: 0, totalKm: 0, avgHr: 0, avgCadence: 0 };
-  try {
-    const { data, error } = await supabase
-      .from('treningi')
-      .select('dystans, tetno_srednie, kadencja_srednia');
-
-    if (error || !data) {
-      return { totalWorkouts: 0, totalKm: 0, avgHr: 0, avgCadence: 0 };
-    }
-
-    const totalWorkouts = data.length;
-    const totalKm = data.reduce((sum: number, item: any) => sum + Number(item.dystans || 0), 0);
-    
-    const hrs = data.filter((d: any) => d.tetno_srednie).map((d: any) => d.tetno_srednie as number);
-    const avgHr = hrs.length ? Math.round(hrs.reduce((a: number, b: number) => a + b, 0) / hrs.length) : 0;
-
-    const cads = data.filter((d: any) => d.kadencja_srednia).map((d: any) => d.kadencja_srednia as number);
-    const avgCadence = cads.length ? Math.round(cads.reduce((a: number, b: number) => a + b, 0) / cads.length) : 0;
-
-    return {
-      totalWorkouts,
-      totalKm: Math.round(totalKm * 100) / 100,
-      avgHr,
-      avgCadence
-    };
-  } catch (err) {
-    return { totalWorkouts: 0, totalKm: 0, avgHr: 0, avgCadence: 0 };
-  }
+// Alias wsteczny dla starego komponentu TrainingCard.tsx
+export async function analyzeTrainingAction(trainingId: number): Promise<{ success: boolean; message: string }> {
+  return { success: true, message: "Kompilacja zachowana" };
 }
 
-export async function getLatestAnalyses() {
-  if (!supabase) return { morningAnalysis: 'Brak połączenia z bazą.', workoutAnalysis: 'Brak połączenia z bazą.' };
-  try {
-    const { data: morning } = await supabase
-      .from('poranki')
-      .select('ai_analiza')
-      .not('ai_analiza', 'is', null)
-      .order('data', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+// ==========================================
+// SEKCJA 3: SYNCHRONIZACJA ZE STRAVA (PULL)
+// ==========================================
 
-    const { data: workout } = await supabase
-      .from('treningi')
-      .select('ai_analiza')
-      .not('ai_analiza', 'is', null)
-      .order('data', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    return {
-      morningAnalysis: morning?.ai_analiza || 'Brak ostatniej analizy porannej.',
-      workoutAnalysis: workout?.ai_analiza || 'Brak ostatniej analizy treningu.'
-    };
-  } catch (err) {
-    return {
-      morningAnalysis: 'Brak analizy.',
-      workoutAnalysis: 'Brak analizy.'
-    };
-  }
-}
-
-// Eksport wsteczny dla kompatybilności ze starym komponentem TrainingCard.tsx
-export async function analyzeTrainingAction(training: any): Promise<string> {
-  return "Analiza legacy";
-}
-
-// Dodaj na końcu pliku src/app/actions.ts
-
-// 1. Pomocnicza funkcja do pobierania tymczasowego Access Tokena
 async function getStravaAccessToken(): Promise<string> {
   const clientId = process.env.STRAVA_CLIENT_ID;
   const clientSecret = process.env.STRAVA_CLIENT_SECRET;
@@ -314,23 +373,18 @@ async function getStravaAccessToken(): Promise<string> {
     throw new Error(`Błąd odświeżania tokenu Strava: ${errText}`);
   }
 
-  const data = await response.json();
+  const data = await response.json() as any;
   return data.access_token;
 }
-
-// 2. Główna akcja pobierająca i zapisująca treningi z ostatnich 2 miesięcy
-// Zaktualizowana wersja funkcji w src/app/actions.ts
 
 export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; importedCount?: number; error?: string }> {
   try {
     const accessToken = await getStravaAccessToken();
 
-    // Obliczamy timestamp dla okresu sprzed 60 dni (w sekundach)
-    const sixtyDaysAgo = Math.floor(Date.now() / 1000) - 60 * 24 * 60 * 60;
+    const thirtyDaysAgo = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
 
-    // Pobieramy aktywności ze Stravy
     const response = await fetch(
-      `https://www.strava.com/api/v3/athlete/activities?after=${sixtyDaysAgo}&per_page=100`,
+      `https://www.strava.com/api/v3/athlete/activities?after=${thirtyDaysAgo}&per_page=100`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -347,7 +401,6 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
       return { success: true, importedCount: 0 };
     }
 
-    // --- KLUCZOWE ZABEZPIECZENIE: Pobieramy ID treningów, które już mamy w bazie ---
     const { data: existingWorkouts, error: fetchError } = await supabase
       .from("treningi")
       .select("strava_id")
@@ -357,18 +410,14 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
       throw fetchError;
     }
 
-    // Tworzymy zestaw (Set) z dotychczasowymi ID dla szybkiego wyszukiwania
     const existingIds = new Set(existingWorkouts?.map((w: any) => Number(w.strava_id)) || []);
 
-    // Filtrujemy dane ze Stravy: zostawiamy TYLKO te aktywności, których NIE MA jeszcze w naszej bazie
     const newActivities = stravaActivities.filter((act: any) => !existingIds.has(Number(act.id)));
 
-    // Jeśli nie ma nowych treningów, kończymy działanie bez dotykania bazy
     if (newActivities.length === 0) {
       return { success: true, importedCount: 0 };
     }
 
-    // Mapujemy wyłącznie TRUALE NOWE treningi
     const mappedTreningi = newActivities.map((act: any) => {
       let rodzaj = "Rower";
       const typeStr = act.sport_type || act.type || "";
@@ -392,11 +441,10 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
         tetno_srednie: act.has_heartrate && act.average_heartrate ? Math.round(act.average_heartrate) : null,
         tetno_max: act.has_heartrate && act.max_heartrate ? Math.round(act.max_heartrate) : null,
         kadencja_srednia: act.average_cadence ? Math.round(act.average_cadence) : null,
-        wyslano: false // Nowy trening oznaczamy jako "nie wysłany do analizy"
+        wyslano: false
       };
     });
 
-    // Zapisujemy w Supabase tylko nowe rekordy przy użyciu operacji INSERT
     const { error: insertError } = await supabase
       .from("treningi")
       .insert(mappedTreningi);
@@ -411,4 +459,132 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
     console.error("Błąd synchronizacji Stravy:", err);
     return { success: false, error: err.message || "Nie udało się zsynchronizować danych." };
   }
+}
+
+// ==========================================
+// SEKCJA 4: CZAT INTERAKTYWNY (TEKST + ZDJĘCIA)
+// ==========================================
+
+export async function getChatHistory(): Promise<Message[]> {
+  const { data, error } = await supabase
+    .from('czat_wiadomosci')
+    .select('id, rola, tresc, obrazek_base64, created_at')
+    .order('created_at', { ascending: true })
+    .limit(10);
+
+  if (error) {
+    console.error("Błąd pobierania historii czatu:", error);
+    return [];
+  }
+
+  return (data || []) as Message[];
+}
+
+export async function sendChatMessage(
+  content: string, 
+  imageBase64?: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!content.trim() && !imageBase64) {
+    return { success: false, error: "Wiadomość nie może być pusta" };
+  }
+
+  const { error: insertUserError } = await supabase
+    .from('czat_wiadomosci')
+    .insert([{ 
+      rola: 'user', 
+      tresc: content, 
+      obrazek_base64: imageBase64 || null 
+    }]);
+
+  if (insertUserError) {
+    console.error("Błąd zapisu wiadomości użytkownika:", insertUserError);
+    return { success: false, error: "Nie udało się zapisać Twojej wiadomości." };
+  }
+
+  try {
+    const history = await getChatHistory();
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("Brak klucza API Gemini (GEMINI_API_KEY) w środowisku.");
+    }
+
+    const contents = history.map((msg: Message, index: number) => {
+      const parts: any[] = [{ text: msg.tresc }];
+      const img = msg.obrazek_base64;
+
+      if (msg.rola === 'user' && img && index === history.length - 1) {
+        const matches = img.match(/^data:(image\/[a-zA-Z]+);base64,(.+)$/);
+        if (matches && matches.length === 3) {
+          const mimeType = matches[1];
+          const rawBase64 = matches[2];
+
+          parts.push({
+            inlineData: {
+              mimeType: mimeType,
+              data: rawBase64
+            }
+          });
+        }
+      }
+
+      return {
+        role: msg.rola,
+        parts: parts
+      };
+    });
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: SYSTEM_INSTRUCTION }]
+          },
+          contents: contents
+        })
+      }
+    );
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Błąd API Gemini: ${response.status} - ${errText}`);
+    }
+
+    const responseData = await response.json() as any;
+    const botText = responseData.candidates?.[0]?.content?.parts?.[0]?.text || "Brak odpowiedzi od trenera.";
+
+    const { error: insertBotError } = await supabase
+      .from('czat_wiadomosci')
+      .insert([{ rola: 'model', tresc: botText }]);
+
+    if (insertBotError) {
+      console.error("Błąd zapisu odpowiedzi trenera:", insertBotError);
+    }
+
+    revalidatePath('/');
+    return { success: true };
+  } catch (err: any) {
+    console.error("Błąd podczas przetwarzania czatu:", err);
+    return { success: false, error: err.message || "Wystąpił nieoczekiwany błąd." };
+  }
+}
+
+export async function clearChatHistory(): Promise<{ success: boolean }> {
+  const { error } = await supabase
+    .from('czat_wiadomosci')
+    .delete()
+    .neq('id', 0);
+
+  if (error) {
+    console.error("Błąd czyszczenia czatu:", error);
+    return { success: false };
+  }
+
+  revalidatePath('/');
+  return { success: true };
 }
