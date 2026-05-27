@@ -43,9 +43,9 @@ export default async function DashboardPage() {
         <header className="border-b border-gray-800 pb-4">
           <h1 className="text-3xl font-extrabold tracking-tight text-emerald-500">CEL 75 (Hubert)</h1>
           <p className="text-gray-400 text-sm mt-1">Dyrektor Sportowy w chmurze (Supabase + Google Gemini API)</p>
-          <StravaSyncButton />
-        </header>
 
+        </header>
+          <StravaSyncButton />
         {/* 1. SEKCJA STATYSTYK */}
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 text-center">
@@ -181,7 +181,7 @@ export default async function DashboardPage() {
   </div>
   
   {/* TUTAJ WKLEJAMY POMARAŃCZOWY PRZYCISK STRAVY */}
-  <StravaSyncButton />
+  <TrainerChat />
 </div>
       </div>
     </div>
