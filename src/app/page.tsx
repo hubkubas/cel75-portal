@@ -8,6 +8,7 @@ import {
   sendWorkoutToAI
 } from './actions';
 import { SubmitButton } from './submit-button';
+import StravaSyncButton from '@/components/StravaSyncButton';
 
 export const revalidate = 0; // Wyłączamy cache, aby dane zawsze ładowały się na żywo
 
@@ -40,6 +41,7 @@ export default async function DashboardPage() {
         {/* Nagłówek */}
         <header className="border-b border-gray-800 pb-4">
           <h1 className="text-3xl font-extrabold tracking-tight text-emerald-500">CEL 75 (Hubert)</h1>
+          <StravaSyncButton />
           <p className="text-gray-400 text-sm mt-1">Dyrektor Sportowy w chmurze (Supabase + Google Gemini API)</p>
         </header>
 
@@ -107,7 +109,7 @@ export default async function DashboardPage() {
                     <input name="jakosc_snu" type="number" min="0" max="100" required className="w-full bg-gray-950 border border-gray-800 rounded p-2 text-white text-sm focus:border-emerald-500 outline-none hover:border-emerald-500/50 transition-colors" />
                   </div>
                 </div>
-                
+
                 {/* NOWE POLE: CZAS NA TRENING */}
                 <div>
                   <label className="block text-xs text-gray-400 mb-1">Ile czasu możesz dziś przeznaczyć na trening rowerowy? (minuty)</label>

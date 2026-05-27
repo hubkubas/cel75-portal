@@ -283,3 +283,112 @@ export async function getLatestAnalyses() {
 export async function analyzeTrainingAction(training: any): Promise<string> {
   return "Analiza legacy";
 }
+
+// Dodaj na końcu pliku src/app/actions.ts
+
+// 1. Pomocnicza funkcja do pobierania tymczasowego Access Tokena
+async function getStravaAccessToken(): Promise<string> {
+  const clientId = process.env.STRAVA_CLIENT_ID;
+  const clientSecret = process.env.STRAVA_CLIENT_SECRET;
+  const refreshToken = process.env.STRAVA_REFRESH_TOKEN;
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error("Brak zmiennych środowiskowych dla Stravy w systemie.");
+  }
+
+  const response = await fetch("https://www.strava.com/api/v3/oauth/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Błąd odświeżania tokenu Strava: ${errText}`);
+  }
+
+  const data = await response.json();
+  return data.access_token;
+}
+
+// 2. Główna akcja pobierająca i zapisująca treningi z ostatnich 2 miesięcy
+export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; importedCount?: number; error?: string }> {
+  try {
+    const accessToken = await getStravaAccessToken();
+
+    // Obliczamy timestamp dla okresu sprzed 60 dni (w sekundach)
+    const sixtyDaysAgo = Math.floor(Date.now() / 1000) - 60 * 24 * 60 * 60;
+
+    // Pobieramy aktywności ze Stravy
+    const response = await fetch(
+      `https://www.strava.com/api/v3/athlete/activities?after=${sixtyDaysAgo}&per_page=100`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Błąd pobierania aktywności: ${response.statusText}`);
+    }
+
+    const stravaActivities = await response.json();
+    if (!Array.isArray(stravaActivities) || stravaActivities.length === 0) {
+      return { success: true, importedCount: 0 };
+    }
+
+    // Mapowanie treningów na strukturę tabeli Supabase
+    const mappedTreningi = stravaActivities.map((act: any) => {
+      // Mapowanie typu sportu na dozwolone ENUM w Supabase: Bieg, Rower, Pływanie, Siłownia
+      let rodzaj = "Rower";
+      const typeStr = act.sport_type || act.type || "";
+      if (typeStr === "Run") rodzaj = "Bieg";
+      else if (typeStr === "Swim") rodzaj = "Pływanie";
+      else if (typeStr === "WeightTraining") rodzaj = "Siłownia";
+
+      // Przeliczenia: dystans z metrów na kilometry, czas z sekund na minuty
+      const dystansKm = act.distance ? parseFloat((act.distance / 1000).toFixed(2)) : 0;
+      const czasMinuty = act.moving_time ? Math.round(act.moving_time / 60) : 0;
+
+      // Wyciągnięcie samej daty (YYYY-MM-DD)
+      const dataTreningu = act.start_date_local 
+        ? act.start_date_local.substring(0, 10) 
+        : new Date().toISOString().substring(0, 10);
+
+      return {
+        strava_id: act.id,
+        data: dataTreningu,
+        rodzaj: rodzaj,
+        dystans: dystansKm > 0 ? dystansKm : null,
+        czas_minuty: czasMinuty > 0 ? czasMinuty : null,
+        tetno_srednie: act.has_heartrate && act.average_heartrate ? Math.round(act.average_heartrate) : null,
+        tetno_max: act.has_heartrate && act.max_heartrate ? Math.round(act.max_heartrate) : null,
+        kadencja_srednia: act.average_cadence ? Math.round(act.average_cadence) : null,
+        wyslano: false
+      };
+    });
+
+    // Wprowadzanie do bazy przy użyciu UPSERT – jeśli strava_id już istnieje, rekord zostanie zaktualizowany
+    const { error: upsertError } = await supabase
+      .from("treningi")
+      .upsert(mappedTreningi, { onConflict: "strava_id" });
+
+    if (upsertError) {
+      throw upsertError;
+    }
+
+    revalidatePath("/");
+    return { success: true, importedCount: mappedTreningi.length };
+  } catch (err: any) {
+    console.error("Błąd synchronizacji Stravy:", err);
+    return { success: false, error: err.message || "Nie udało się zsynchronizować danych." };
+  }
+}
