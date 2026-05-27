@@ -9,6 +9,7 @@ import {
 } from './actions';
 import { SubmitButton } from './submit-button';
 import StravaSyncButton from '@/components/StravaSyncButton';
+import TrainerChat from '@/components/TrainerChat';
 
 export const revalidate = 0; // Wyłączamy cache, aby dane zawsze ładowały się na żywo
 
@@ -41,8 +42,8 @@ export default async function DashboardPage() {
         {/* Nagłówek */}
         <header className="border-b border-gray-800 pb-4">
           <h1 className="text-3xl font-extrabold tracking-tight text-emerald-500">CEL 75 (Hubert)</h1>
-          <StravaSyncButton />
           <p className="text-gray-400 text-sm mt-1">Dyrektor Sportowy w chmurze (Supabase + Google Gemini API)</p>
+          <StravaSyncButton />
         </header>
 
         {/* 1. SEKCJA STATYSTYK */}
@@ -173,8 +174,16 @@ export default async function DashboardPage() {
             </div>
           </div>
         </section>
-
       </div>
+      <div className="flex justify-between items-center mb-8 border-b border-slate-800 pb-6">
+  <div>
+    <h1 className="text-3xl font-bold text-slate-100">CEL 75 🚴‍♂️</h1>
+    <p className="text-slate-400 text-sm">Portal Huberta</p>
+  </div>
+  
+  {/* TUTAJ WKLEJAMY POMARAŃCZOWY PRZYCISK STRAVY */}
+  <StravaSyncButton />
+</div>
     </div>
   );
 }
