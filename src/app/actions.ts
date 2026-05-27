@@ -280,6 +280,6 @@ export async function getLatestAnalyses() {
 }
 
 // Eksport wsteczny dla kompatybilności ze starym komponentem TrainingCard.tsx
-export async function analyzeTrainingAction(workoutId: number) {
-  return sendWorkoutToAI(workoutId);
+export async function analyzeTrainingAction(training: any): Promise<string> {
+  return "Analiza legacy";
 }
