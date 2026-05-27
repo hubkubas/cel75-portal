@@ -53,18 +53,10 @@ async function sendToGeminiAI(prompt: string): Promise<string> {
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: ATHLETE_PROFILE }]
-          },
-          contents: [
-            {
-              parts: [{ text: prompt }]
-            }
-          ]
+          systemInstruction: { parts: [{ text: ATHLETE_PROFILE }] },
+          contents: [{ parts: [{ text: prompt }] }]
         })
       }
     );
@@ -75,7 +67,6 @@ async function sendToGeminiAI(prompt: string): Promise<string> {
 
     const data = await response.json();
     const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    
     return reply || 'Nie udało się uzyskać odpowiedzi z Gemini AI.';
   } catch (error: any) {
     console.warn(`Problem z Gemini: ${error?.message || error}`);
@@ -88,6 +79,9 @@ async function sendToGeminiAI(prompt: string): Promise<string> {
 // -----------------------------------------------------------------------------
 
 export async function getTodayMorningReport() {
+  if (!supabase) {
+    return { dbError: 'Brak aktywnego połączenia z bazą danych Supabase. Sprawdź konfigurację zmiennych w panelu Vercel (Settings -> Environment Variables).' };
+  }
   try {
     const todayStr = getLocalDateString();
     const { data, error } = await supabase
@@ -97,7 +91,7 @@ export async function getTodayMorningReport() {
       .maybeSingle();
 
     if (error) {
-      console.warn(`DIAGNOSTYKA PORANKI -> WIADOMOŚĆ: "${error.message}" | KOD: "${error.code}" | SZCZEGÓŁY: "${error.details}"`);
+      console.warn(`DIAGNOSTYKA PORANKI -> WIADOMOŚĆ: "${error.message}" | KOD: "${error.code}"`);
       return null;
     }
     return data;
@@ -108,17 +102,17 @@ export async function getTodayMorningReport() {
 }
 
 export async function saveMorningReport(formData: FormData): Promise<void> {
+  if (!supabase) return;
   try {
     const todayStr = getLocalDateString();
 
     const waga = parseFloat(formData.get('waga') as string) || null;
     const hrv = parseInt(formData.get('hrv') as string, 10) || null;
     const bodyBattery = parseInt(formData.get('body_battery') as string, 10) || null;
-    const jakoscSnu = parseInt(formData.get('jakosc_snu') as string, 10) || null; // <--- POZYCJA ZMIENIONA NA JAKOŚĆ SNU
+    const jakoscSnu = parseInt(formData.get('jakosc_snu') as string, 10) || null;
     const czasNaTrening = parseInt(formData.get('czas_na_trening') as string, 10) || null;
     const notatki = formData.get('notatki') as string || '';
 
-    // Zapis do bazy Supabase (z nową kolumną jakosc_snu zamiast sen_minuty)
     const { data: insertedData, error } = await supabase
       .from('poranki')
       .insert([
@@ -127,7 +121,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
           waga,
           hrv,
           body_battery: bodyBattery,
-          jakosc_snu: jakoscSnu, // <--- ZAPIS DO BAZY
+          jakosc_snu: jakoscSnu,
           czas_na_trening: czasNaTrening,
           notatki
         }
@@ -135,16 +129,17 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
       .select()
       .single();
 
-    if (error) {
-      if (error.code === '23505') {
+    // STRAŻNIK TYPÓW (Type Guard): Jeśli wystąpił błąd lub nie ma danych, zatrzymujemy akcję
+    if (error || !insertedData) {
+      if (error?.code === '23505') {
         console.warn('Raport na dzisiejszy dzień został już zapisany.');
         return;
       }
-      console.warn(`Błąd zapisu poranka: ${error.message}`);
+      console.warn(`Błąd zapisu poranka: ${error?.message || 'Nieznany błąd bazy'}`);
       return;
     }
 
-    // Przekazanie jakości snu do promptu Gemini
+    // Teraz kompilator wie, że insertedData na 100% istnieje i ma prawidłowy typ
     const prompt = `Raport Poranny z Garmin: Waga: ${waga}kg, HRV: ${hrv}, Body Battery: ${bodyBattery}%, Jakość snu (skala 0-100): ${jakoscSnu}/100. Dostępny czas Huberta na trening rowerowy dzisiaj: ${czasNaTrening ? `${czasNaTrening} minut` : 'Brak czasu/brak określenia'}. Notatki zawodnika: "${notatki}". Przygotuj dla niego pełną, rozbudowaną, niezwykle szczegółową odprawę trenerską w swoim unikalnym stylu Dyrektora Sportowego (Meldunek, Analiza wagi, Telemetria, Plan na dziś, Paliwo na dziś, Protokół wieczorny, Zlecenie treningowe na dziś na podstawie zadeklarowanego czasu).`;
     const aiAnalysis = await sendToGeminiAI(prompt);
 
@@ -164,6 +159,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
 // -----------------------------------------------------------------------------
 
 export async function getUnsentWorkout() {
+  if (!supabase) return null;
   try {
     const { data, error } = await supabase
       .from('treningi')
@@ -174,7 +170,7 @@ export async function getUnsentWorkout() {
       .maybeSingle();
 
     if (error) {
-      console.warn(`DIAGNOSTYKA TRENINGI -> WIADOMOŚĆ: "${error.message}" | KOD: "${error.code}" | SZCZEGÓŁY: "${error.details}"`);
+      console.warn(`DIAGNOSTYKA TRENINGI -> WIADOMOŚĆ: "${error.message}" | KOD: "${error.code}"`);
       return null;
     }
     return data;
@@ -185,6 +181,7 @@ export async function getUnsentWorkout() {
 }
 
 export async function sendWorkoutToAI(workoutId: number) {
+  if (!supabase) return { success: false, error: 'Brak połączenia z bazą.' };
   try {
     const { data: workout, error } = await supabase
       .from('treningi')
@@ -192,6 +189,7 @@ export async function sendWorkoutToAI(workoutId: number) {
       .eq('id', workoutId)
       .single();
 
+    // STRAŻNIK TYPÓW (Type Guard): Bezpieczeństwo przed wartością null
     if (error || !workout) {
       return { success: false, error: 'Nie znaleziono treningu.' };
     }
@@ -220,6 +218,7 @@ export async function sendWorkoutToAI(workoutId: number) {
 // -----------------------------------------------------------------------------
 
 export async function getDashboardStats() {
+  if (!supabase) return { totalWorkouts: 0, totalKm: 0, avgHr: 0, avgCadence: 0 };
   try {
     const { data, error } = await supabase
       .from('treningi')
@@ -230,13 +229,13 @@ export async function getDashboardStats() {
     }
 
     const totalWorkouts = data.length;
-    const totalKm = data.reduce((sum, item) => sum + Number(item.dystans || 0), 0);
+    const totalKm = data.reduce((sum: number, item: any) => sum + Number(item.dystans || 0), 0);
     
-    const hrs = data.filter(d => d.tetno_srednie).map(d => d.tetno_srednie as number);
-    const avgHr = hrs.length ? Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length) : 0;
+    const hrs = data.filter((d: any) => d.tetno_srednie).map((d: any) => d.tetno_srednie as number);
+    const avgHr = hrs.length ? Math.round(hrs.reduce((a: number, b: number) => a + b, 0) / hrs.length) : 0;
 
-    const cads = data.filter(d => d.kadencja_srednia).map(d => d.kadencja_srednia as number);
-    const avgCadence = cads.length ? Math.round(cads.reduce((a, b) => a + b, 0) / cads.length) : 0;
+    const cads = data.filter((d: any) => d.kadencja_srednia).map((d: any) => d.kadencja_srednia as number);
+    const avgCadence = cads.length ? Math.round(cads.reduce((a: number, b: number) => a + b, 0) / cads.length) : 0;
 
     return {
       totalWorkouts,
@@ -250,6 +249,7 @@ export async function getDashboardStats() {
 }
 
 export async function getLatestAnalyses() {
+  if (!supabase) return { morningAnalysis: 'Brak połączenia z bazą.', workoutAnalysis: 'Brak połączenia z bazą.' };
   try {
     const { data: morning } = await supabase
       .from('poranki')
