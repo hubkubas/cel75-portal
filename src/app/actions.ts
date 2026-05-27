@@ -319,6 +319,8 @@ async function getStravaAccessToken(): Promise<string> {
 }
 
 // 2. Główna akcja pobierająca i zapisująca treningi z ostatnich 2 miesięcy
+// Zaktualizowana wersja funkcji w src/app/actions.ts
+
 export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; importedCount?: number; error?: string }> {
   try {
     const accessToken = await getStravaAccessToken();
@@ -345,20 +347,38 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
       return { success: true, importedCount: 0 };
     }
 
-    // Mapowanie treningów na strukturę tabeli Supabase
-    const mappedTreningi = stravaActivities.map((act: any) => {
-      // Mapowanie typu sportu na dozwolone ENUM w Supabase: Bieg, Rower, Pływanie, Siłownia
+    // --- KLUCZOWE ZABEZPIECZENIE: Pobieramy ID treningów, które już mamy w bazie ---
+    const { data: existingWorkouts, error: fetchError } = await supabase
+      .from("treningi")
+      .select("strava_id")
+      .not("strava_id", "is", null);
+
+    if (fetchError) {
+      throw fetchError;
+    }
+
+    // Tworzymy zestaw (Set) z dotychczasowymi ID dla szybkiego wyszukiwania
+    const existingIds = new Set(existingWorkouts?.map((w: any) => Number(w.strava_id)) || []);
+
+    // Filtrujemy dane ze Stravy: zostawiamy TYLKO te aktywności, których NIE MA jeszcze w naszej bazie
+    const newActivities = stravaActivities.filter((act: any) => !existingIds.has(Number(act.id)));
+
+    // Jeśli nie ma nowych treningów, kończymy działanie bez dotykania bazy
+    if (newActivities.length === 0) {
+      return { success: true, importedCount: 0 };
+    }
+
+    // Mapujemy wyłącznie TRUALE NOWE treningi
+    const mappedTreningi = newActivities.map((act: any) => {
       let rodzaj = "Rower";
       const typeStr = act.sport_type || act.type || "";
       if (typeStr === "Run") rodzaj = "Bieg";
       else if (typeStr === "Swim") rodzaj = "Pływanie";
       else if (typeStr === "WeightTraining") rodzaj = "Siłownia";
 
-      // Przeliczenia: dystans z metrów na kilometry, czas z sekund na minuty
       const dystansKm = act.distance ? parseFloat((act.distance / 1000).toFixed(2)) : 0;
       const czasMinuty = act.moving_time ? Math.round(act.moving_time / 60) : 0;
 
-      // Wyciągnięcie samej daty (YYYY-MM-DD)
       const dataTreningu = act.start_date_local 
         ? act.start_date_local.substring(0, 10) 
         : new Date().toISOString().substring(0, 10);
@@ -372,17 +392,17 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
         tetno_srednie: act.has_heartrate && act.average_heartrate ? Math.round(act.average_heartrate) : null,
         tetno_max: act.has_heartrate && act.max_heartrate ? Math.round(act.max_heartrate) : null,
         kadencja_srednia: act.average_cadence ? Math.round(act.average_cadence) : null,
-        wyslano: false
+        wyslano: false // Nowy trening oznaczamy jako "nie wysłany do analizy"
       };
     });
 
-    // Wprowadzanie do bazy przy użyciu UPSERT – jeśli strava_id już istnieje, rekord zostanie zaktualizowany
-    const { error: upsertError } = await supabase
+    // Zapisujemy w Supabase tylko nowe rekordy przy użyciu operacji INSERT
+    const { error: insertError } = await supabase
       .from("treningi")
-      .upsert(mappedTreningi, { onConflict: "strava_id" });
+      .insert(mappedTreningi);
 
-    if (upsertError) {
-      throw upsertError;
+    if (insertError) {
+      throw insertError;
     }
 
     revalidatePath("/");
