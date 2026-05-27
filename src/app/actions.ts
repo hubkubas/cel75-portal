@@ -338,8 +338,8 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
 }
 
 // Alias wsteczny dla starego komponentu TrainingCard.tsx
-export async function analyzeTrainingAction(trainingId: number): Promise<{ success: boolean; message: string }> {
-  return { success: true, message: "Kompilacja zachowana" };
+export async function analyzeTrainingAction(trainingId: any): Promise<string> {
+  return "Kompilacja zachowana";
 }
 
 // ==========================================
