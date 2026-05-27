@@ -174,8 +174,7 @@ export default async function DashboardPage() {
             </div>
           </div>
         </section>
-      </div>
-      <div className="flex justify-between items-center mb-8 border-b border-slate-800 pb-6">
+        <div className="flex justify-between items-center mb-8 border-b border-slate-800 pb-6">
   <div>
     <h1 className="text-3xl font-bold text-slate-100">CEL 75 🚴‍♂️</h1>
     <p className="text-slate-400 text-sm">Portal Huberta</p>
@@ -184,6 +183,7 @@ export default async function DashboardPage() {
   {/* TUTAJ WKLEJAMY POMARAŃCZOWY PRZYCISK STRAVY */}
   <StravaSyncButton />
 </div>
+      </div>
     </div>
   );
 }
