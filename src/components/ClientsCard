@@ -1,0 +1,43 @@
+'use client'
+import { useState } from 'react';
+
+export default function ClientCard({ training }: { training: any }) {
+  const [loading, setLoading] = useState(false);
+  const [response, setResponse] = useState("");
+
+  const sendToAI = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('https://ai.cel75.pl/api/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json', 
+          'Authorization': 'Bearer TWÓJ_KLUCZ_Z_OPEN_WEBUI' 
+        },
+        body: JSON.stringify({
+          model: "gemini-1.5-pro",
+          messages:[{ role: "user", content: `Hubert ukończył trening: ${training["Nazwa Treningu"]}. Dystans: ${training["Dystans"]}. Oceń to.` }]
+        })
+      });
+      const data = await res.json();
+      setResponse(data.choices[0].message.content);
+    } catch (e) {
+      setResponse("Błąd połączenia z AI");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="bg-gray-900 p-8 rounded-2xl border border-blue-900 shadow-2xl max-w-2xl">
+      <h2 className="text-2xl font-bold mb-4">Ostatni trening: {training["Nazwa Treningu"]}</h2>
+      <div className="grid grid-cols-2 gap-4 mb-6">
+          <div className="bg-gray-800 p-4 rounded-lg">Dystans: {training["Dystans"]}</div>
+          <div className="bg-gray-800 p-4 rounded-lg">Czas: {Math.floor(training["Czas"]/60)} min</div>
+      </div>
+      <button onClick={sendToAI} disabled={loading} className="w-full bg-blue-600 p-3 rounded-lg font-bold hover:bg-blue-500 transition">
+        {loading ? "Analizuję..." : "Wyślij do Trenera AI"}
+      </button>
+      {response && <div className="mt-4 p-4 bg-gray-800 rounded text-sm text-blue-200">{response}</div>}
+    </div>
+  );
+}
