@@ -8,17 +8,18 @@ if (!supabaseUrlRaw || !supabaseServiceKeyRaw) {
   throw new Error('Brak zdefiniowanych zmiennych środowiskowych dla Supabase w pliku .env.local.');
 }
 
-// BARDZO BEZPIECZNE CZYSZCZENIE URL:
-// 1. Usuwamy spacje i cudzysłowy (")
-// 2. Usuwamy ewentualny dopisek /rest/v1 lub /rest/v1/ na końcu
-// 3. Usuwamy ukośnik na samym końcu adresu URL (/)
 const supabaseUrl = supabaseUrlRaw
   .trim()
   .replace(/"/g, '')
-  .replace(/\/rest\/v1\/?$/, '') // <--- BEZPIECZNIK: usuwa /rest/v1 na końcu adresu
+  .replace(/\/rest\/v1\/?$/, '')
   .replace(/\/$/, '');
 
 const supabaseServiceKey = supabaseServiceKeyRaw.trim().replace(/"/g, '');
+
+// DIAGNOSTYKA VERCEL: Wypisze początek wklejonej wartości, jeśli nie jest adresem http/https
+if (!supabaseUrl.startsWith('http://') && !supabaseUrl.startsWith('https://')) {
+  console.error(`BŁĄD FORMATA URL W VERCEL: Wklejona wartość zaczyna się od: "${supabaseUrl.substring(0, 25)}..."`);
+}
 
 export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   auth: {
