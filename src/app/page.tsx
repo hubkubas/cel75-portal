@@ -10,6 +10,8 @@ import StravaSyncButton from '@/components/StravaSyncButton';
 import TrainerChat from '@/components/TrainerChat';
 import { SubmitButton } from './submit-button';
 
+export const dynamic = 'force-dynamic'; 
+
 export default async function Page() {
   // 1. Pobieranie danych asynchronicznie bezpośrednio w Server Component
   const todayReport = await getTodayMorningReport();

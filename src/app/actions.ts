@@ -35,8 +35,15 @@ Dieta i Multimedia: Jeśli użytkownik prześle zdjęcie (np. menu z restauracji
 // ==========================================
 
 // Pobiera raport poranny na dzisiejszy dzień
+// Pobiera raport poranny na dzisiejszy dzień
 export async function getTodayMorningReport(): Promise<any | null> {
-  const dzis = new Date().toISOString().substring(0, 10);
+  const dzis = new Date().toLocaleDateString('pl-PL', {
+    timeZone: 'Europe/Warsaw',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).split('.').reverse().join('-');
+
   const { data, error } = await supabase
     .from('poranki')
     .select('*')
@@ -53,8 +60,14 @@ export async function getTodayMorningReport(): Promise<any | null> {
 // Zapisuje raport poranny przychodzący z formularza HTML (FormData) i generuje analizę
 // Zaktualizowana, w pełni zgodna z React Form Action wersja saveMorningReport w src/app/actions.ts
 
+// Zapisuje raport poranny przychodzący z formularza HTML (FormData) i generuje analizę
 export async function saveMorningReport(formData: FormData): Promise<void> {
-  const dzis = new Date().toISOString().substring(0, 10);
+  const dzis = new Date().toLocaleDateString('pl-PL', {
+    timeZone: 'Europe/Warsaw',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).split('.').reverse().join('-');
 
   // Sprawdzamy czy raport na dziś już istnieje
   const { data: existing } = await supabase
@@ -436,10 +449,9 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
       const dystansKm = act.distance ? parseFloat((act.distance / 1000).toFixed(2)) : 0;
       const czasMinuty = act.moving_time ? Math.round(act.moving_time / 60) : 0;
 
-      const dataTreningu = act.start_date_local 
-        ? act.start_date_local.substring(0, 10) 
-        : new Date().toISOString().substring(0, 10);
-
+      const dataTreningu = act.start_date_local
+  ? act.start_date_local.substring(0, 10)
+  : new Date().toLocaleDateString('pl-PL', { timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit' }).split('.').reverse().join('-');
       return {
         strava_id: act.id,
         data: dataTreningu,
