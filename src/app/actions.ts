@@ -1,5 +1,6 @@
 'use server';
 
+import { createClient } from '@/utils/supabase/server';
 import { supabase } from '@/lib/supabase';
 import { revalidatePath } from 'next/cache';
 
@@ -39,6 +40,16 @@ Dieta i Multimedia: Jeśli użytkownik prześle zdjęcie (np. menu z restauracji
 // Pobiera raport poranny na dzisiejszy dzień
 // Pobiera raport poranny na dzisiejszy dzień
 export async function getTodayMorningReport(): Promise<any | null> {
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+  console.log("=== [STRONA GŁÓWNA] AKTUALNIE ZALOGOWANY EMAIL ===", user?.email);
+
+  // Jeśli użytkownik nie jest zalogowany, zwracamy brak raportu
+  if (authError || !user) {
+    return null;
+  }
+
   const dzis = new Date().toLocaleDateString('pl-PL', {
     timeZone: 'Europe/Warsaw',
     year: 'numeric',
@@ -46,11 +57,13 @@ export async function getTodayMorningReport(): Promise<any | null> {
     day: '2-digit'
   }).split('.').reverse().join('-');
 
+  // Pobieramy raport na dziś, ale TYLKO dla zalogowanego użytkownika (user_id)
   const { data, error } = await supabase
     .from('poranki')
     .select('*')
     .eq('data', dzis)
-    .maybeSingle();
+    .eq('user_id', user.id)
+    .maybeSingle(); // Używamy .maybeSingle() zamiast .single(), aby uniknąć błędów w konsoli, gdy raportu jeszcze nie ma
 
   if (error) {
     console.error("Błąd getTodayMorningReport:", error);
@@ -64,6 +77,13 @@ export async function getTodayMorningReport(): Promise<any | null> {
 
 // Zapisuje raport poranny przychodzący z formularza HTML (FormData) i generuje analizę
 export async function saveMorningReport(formData: FormData): Promise<void> {
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    throw new Error("Brak autoryzacji do wykonania tej akcji.");
+  }
+
   const dzis = new Date().toLocaleDateString('pl-PL', {
     timeZone: 'Europe/Warsaw',
     year: 'numeric',
@@ -71,15 +91,16 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
     day: '2-digit'
   }).split('.').reverse().join('-');
 
-  // Sprawdzamy czy raport na dziś już istnieje
+  // Sprawdzamy, czy raport na dziś już istnieje DLA TEGO UŻYTKOWNIKA
   const { data: existing } = await supabase
     .from('poranki')
     .select('id')
     .eq('data', dzis)
-    .single();
+    .eq('user_id', user.id)
+    .maybeSingle();
 
   if (existing) {
-    console.warn("Raport na dziś został już wysłany.");
+    console.warn("Raport na dziś został już wysłany przez tego użytkownika.");
     return;
   }
 
@@ -91,19 +112,47 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
   const czas_na_trening = parseInt(formData.get('czas_na_trening') as string, 10) || 0;
   const notatki = (formData.get('notatki') as string) || '';
 
+  // 1. DYNAMICZNA PERSONALIZACJA AI: Pobieramy dane profilu zalogowanego użytkownika
+  const { data: profile } = await supabase
+    .from('profile')
+    .select('*')
+    .eq('id', user.id)
+    .single();
+
+  const imie = profile?.imie || 'zawodnik';
+  const wiek = profile?.wiek || '';
+  const zone2 = profile?.strefy_tetna?.zone2 || { min: 105, max: 115 };
+  const kadencja = profile?.strefy_tetna?.kadencja_target || 90;
+  const filozofia = profile?.filozofia_treningowa || 'Mitochondrialna baza (Zone 2) oparta o założenia dr. Iñigo San-Millána';
+
   let aiAnaliza = "";
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
-      const prompt = `Przeanalizuj dzisiejszy poranek Huberta:
+      // Budujemy spersonalizowany prompt na podstawie danych z profilu
+      const prompt = `Przeanalizuj dzisiejszy poranek zawodnika o imieniu ${imie}:
       Waga: ${waga} kg
       HRV: ${hrv} ms
       Body Battery: ${body_battery}
       Jakość snu: ${jakosc_snu}/100
       Czas na trening dzisiaj: ${czas_na_trening} minut
-      Notatki Huberta: ${notatki || 'brak'}
+      Notatki użytkownika: ${notatki || 'brak'}
       
       Przygotuj długą, pełną pasji i kolarskich emotikonów odprawę od Trenera z Wozu Technicznego, w tym zarys menu (diety) oraz precyzyjne zlecenie treningowe na dzisiejsze ${czas_na_trening} minut.`;
+
+      // Budujemy dynamiczną instrukcję systemową na podstawie profilu z bazy danych
+      const dynamicSystemInstruction = `
+        Jesteś wybitnym Trenerem AI, Dyrektorem Sportowym oraz ekspertem w dziedzinie fizjologii sportu i zdrowia mitochondrialnego. 
+        Twój podopieczny to ${imie}${wiek ? `, wiek: ${wiek} lat` : ''}.
+        Główna filozofia treningowa: ${filozofia}.
+
+        Kluczowe parametry treningowe dla tego zawodnika:
+        - Strefa 2 (Zone 2) tętna wynosi: ${zone2.min}-${zone2.max} bpm.
+        - Docelowa kadencja w Zone 2: ${kadencja}+ RPM.
+        - Unikaj "No Man's Land" (Strefa 3), chroniąc organizm zawodnika przed zbędnym obciążeniem, chyba że wskaźniki biologiczne wskazują na wysoką gotowość.
+
+        Analizuj codzienne raporty poranne i treningi w stylu „Dyrektora Sportowego w wozie technicznym” – merytorycznie, z kolarskim humorem, motywująco, ale rygorystycznie opierając się na danych o tętnie i HRV.
+      `;
 
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
@@ -111,7 +160,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+            systemInstruction: { parts: [{ text: dynamicSystemInstruction }] },
             contents: [{ role: "user", parts: [{ text: prompt }] }]
           })
         }
@@ -126,9 +175,11 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
     console.error("Błąd generowania analizy porannej przez Gemini:", err);
   }
 
+  // Zapisujemy poranek w bazie danych, dodając kluczowe pole "user_id"
   const { error } = await supabase
     .from('poranki')
     .insert([{
+      user_id: user.id, // Przypisujemy rekord do zalogowanego użytkownika
       data: dzis,
       waga,
       hrv,
