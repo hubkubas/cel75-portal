@@ -10,9 +10,24 @@ import StravaSyncButton from '@/components/StravaSyncButton';
 import TrainerChat from '@/components/TrainerChat';
 import { SubmitButton } from './submit-button';
 
+// --- DODAJEMY TE DWIE IMPORTY ---
+import { redirect } from 'next/navigation';
+import { createClient } from '@/utils/supabase/server';
+
 export const dynamic = 'force-dynamic'; 
 
 export default async function Page() {
+  // --- DODAJEMY TĘ DIAGNOSTYKĘ I WARUNEK ---
+  const supabase = await createClient();
+  const { data: { user }, error } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    // Jeśli użytkownik nie jest zalogowany (lub sesja wygasła), odsyłamy do logowania
+    redirect('/login');
+  }
+
+  // --- TUTAJ DALEJ IDZIE TWÓJ DOTYCHCZASOWY KOD ---
+  // (np. pobieranie danych typu: const stats = await getDashboardStats()...)
   // 1. Pobieranie danych asynchronicznie bezpośrednio w Server Component
   const todayReport = await getTodayMorningReport();
   const unsentWorkout = await getUnsentWorkout();
