@@ -42,7 +42,6 @@ Dieta i Multimedia: Jeśli użytkownik prześle zdjęcie (np. menu z restauracji
 export async function getTodayMorningReport(): Promise<any | null> {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
-
   console.log("=== [STRONA GŁÓWNA] AKTUALNIE ZALOGOWANY EMAIL ===", user?.email);
 
   // Jeśli użytkownik nie jest zalogowany, zwracamy brak raportu
