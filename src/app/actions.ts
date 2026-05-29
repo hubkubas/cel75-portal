@@ -307,7 +307,6 @@ export async function getDashboardStats(): Promise<any> {
   };
 }
 
-// Pobiera ostatnią analizę poranka i ostatnią analizę treningu jako jeden obiekt z dwoma polami
 export async function getLatestAnalyses(): Promise<{ morningAnalysis: string | null, workoutAnalysis: string | null }> {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -342,11 +341,6 @@ export async function getLatestAnalyses(): Promise<{ morningAnalysis: string | n
   };
 }
 
-// ==========================================
-// SEKCJA 2: TRENINGI ZE STRAVY & ANALIZA AI (DLA PAGE.TSX)
-// ==========================================
-
-// Pobiera pojedynczy trening, który nie został jeszcze oceniony przez AI
 export async function getUnsentWorkout(): Promise<any | null> {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
