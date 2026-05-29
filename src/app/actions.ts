@@ -1,8 +1,9 @@
 'use server';
-
+import { redirect } from 'next/navigation';
+import { revalidatePath } from 'next/cache';
 import { createClient } from '@/utils/supabase/server';
 import { supabase } from '@/lib/supabase';
-import { revalidatePath } from 'next/cache';
+
 
 // ==========================================
 // TYPY I PROMPTY SYSTEMOWE
@@ -76,12 +77,16 @@ export async function getTodayMorningReport(): Promise<any | null> {
 
 // Zapisuje raport poranny przychodzący z formularza HTML (FormData) i generuje analizę
 export async function saveMorningReport(formData: FormData): Promise<void> {
+  console.log("=== [DIAGNOSTYKA] OTRZYMANO FORMULARZ PORANNY ===");
+  
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
 
   if (authError || !user) {
+    console.log("-> [BŁĄD] Brak zalogowanego użytkownika.");
     throw new Error("Brak autoryzacji do wykonania tej akcji.");
   }
+  console.log("-> Zalogowany użytkownik ID:", user.id);
 
   const dzis = new Date().toLocaleDateString('pl-PL', {
     timeZone: 'Europe/Warsaw',
@@ -89,8 +94,10 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
     month: '2-digit',
     day: '2-digit'
   }).split('.').reverse().join('-');
+  console.log("-> Wyliczona dzisiejsza data polska:", dzis);
 
-  // Sprawdzamy, czy raport na dziś już istnieje DLA TEGO UŻYTKOWNIKA
+  // Sprawdzamy czy raport istnieje
+  console.log("-> Sprawdzam, czy istnieje już raport na dziś dla tego ID...");
   const { data: existing } = await supabase
     .from('poranki')
     .select('id')
@@ -99,24 +106,34 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
     .maybeSingle();
 
   if (existing) {
-    console.warn("Raport na dziś został już wysłany przez tego użytkownika.");
+    console.log("-> [Cicha blokada] Raport na dziś już istnieje w bazie pod ID:", existing.id);
+    console.log("=== [DIAGNOSTYKA] KONIEC PROCESU (BEZ ZAPISU) ===");
     return;
   }
+  console.log("-> Brak istniejącego raportu. Przechodzę dalej.");
 
-  // Bezpieczne wyciąganie wartości z obiektu FormData
+  // Dane biologiczne
   const waga = parseFloat(formData.get('waga') as string) || 0;
   const hrv = parseInt(formData.get('hrv') as string, 10) || 0;
   const body_battery = parseInt(formData.get('body_battery') as string, 10) || 0;
   const jakosc_snu = parseInt(formData.get('jakosc_snu') as string, 10) || 0;
   const czas_na_trening = parseInt(formData.get('czas_na_trening') as string, 10) || 0;
   const notatki = (formData.get('notatki') as string) || '';
+  console.log(`-> Wyciągnięte dane: waga=${waga}, hrv=${hrv}, BB=${body_battery}, sen=${jakosc_snu}, trening=${czas_na_trening}`);
 
-  // 1. DYNAMICZNA PERSONALIZACJA AI: Pobieramy dane profilu zalogowanego użytkownika
-  const { data: profile } = await supabase
+  // Pobieranie profilu
+  console.log("-> Pobieram profil użytkownika...");
+  const { data: profile, error: profileError } = await supabase
     .from('profile')
     .select('*')
     .eq('id', user.id)
     .single();
+
+  if (profileError) {
+    console.log("-> [BŁĄD] Nie udało się pobrać profilu z bazy:", profileError.message);
+  } else {
+    console.log("-> Pomyślnie pobrano profil. Zawodnik:", profile?.imie, ", wiek:", profile?.wiek);
+  }
 
   const imie = profile?.imie || 'zawodnik';
   const wiek = profile?.wiek || '';
@@ -127,8 +144,10 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
   let aiAnaliza = "";
   try {
     const apiKey = process.env.GEMINI_API_KEY;
+    console.log("-> Klucz Gemini:", apiKey ? "ZNAJDZIONY (OBECNY)" : "BRAK KLUCZA W .ENV");
+    
     if (apiKey) {
-      // Budujemy spersonalizowany prompt na podstawie danych z profilu
+      console.log("-> Łączę się z Gemini API...");
       const prompt = `Przeanalizuj dzisiejszy poranek zawodnika o imieniu ${imie}:
       Waga: ${waga} kg
       HRV: ${hrv} ms
@@ -139,7 +158,6 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
       
       Przygotuj długą, pełną pasji i kolarskich emotikonów odprawę od Trenera z Wozu Technicznego, w tym zarys menu (diety) oraz precyzyjne zlecenie treningowe na dzisiejsze ${czas_na_trening} minut.`;
 
-      // Budujemy dynamiczną instrukcję systemową na podstawie profilu z bazy danych
       const dynamicSystemInstruction = `
         Jesteś wybitnym Trenerem AI, Dyrektorem Sportowym oraz ekspertem w dziedzinie fizjologii sportu i zdrowia mitochondrialnego. 
         Twój podopieczny to ${imie}${wiek ? `, wiek: ${wiek} lat` : ''}.
@@ -165,20 +183,25 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
         }
       );
 
+      console.log("-> Status odpowiedzi Gemini:", response.status);
       if (response.ok) {
         const resData = await response.json() as any;
         aiAnaliza = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        console.log("-> Pomyślnie wygenerowano odprawę AI (długość:", aiAnaliza.length, "znaków)");
+      } else {
+        const errText = await response.text();
+        console.log("-> [BŁĄD] Gemini API zwróciło błąd:", errText);
       }
     }
-  } catch (err) {
-    console.error("Błąd generowania analizy porannej przez Gemini:", err);
+  } catch (err: any) {
+    console.error("-> [WYJĄTEK] Podczas kontaktu z Gemini:", err.message);
   }
 
-  // Zapisujemy poranek w bazie danych, dodając kluczowe pole "user_id"
-  const { error } = await supabase
+  console.log("-> Próbuję zapisać dane w tabeli 'poranki' w Supabase...");
+  const { error: insertError } = await supabase
     .from('poranki')
     .insert([{
-      user_id: user.id, // Przypisujemy rekord do zalogowanego użytkownika
+      user_id: user.id,
       data: dzis,
       waga,
       hrv,
@@ -189,44 +212,26 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
       ai_analiza: aiAnaliza || null
     }]);
 
-  if (error) {
-    console.error("Błąd zapisu poranka:", error);
+  if (insertError) {
+    console.log("-> [BŁĄD KRYTYCZNY] Zapis w Supabase nie powiódł się!");
+    console.log("-> Komunikat błędu:", insertError.message);
+    console.log("-> Pełny obiekt błędu:", insertError);
+    console.log("=== [DIAGNOSTYKA] KONIEC PROCESU ===");
     return;
   }
 
+  console.log("-> [SUKCES] Dane zapisane pomyślnie. Revaliduję ścieżkę główną...");
   revalidatePath('/');
+  console.log("=== [DIAGNOSTYKA] KONIEC PROCESU ===");
 }
 
 // Pobiera średnie i zagregowane statystyki do wyświetlenia na pulpicie (w angielskim nazewnictwie camelCase)
-export async function getDashboardStats(): Promise<{
-  avgWeight: number;
-  avgHrv: number;
-  avgSleep: number;
-  totalWorkouts: number;
-  totalKm: number;
-  avgHr: number;
-  avgCadence: number;
-  // Fallback po polsku w razie potrzeby
-  srednia_waga: number;
-  sredni_hrv: number;
-  srednia_jakosc_snu: number;
-  suma_dystans: number;
-  suma_czas_minuty: number;
-}> {
-  const { data: poranki, error: pError } = await supabase
-    .from('poranki')
-    .select('waga, hrv, body_battery, jakosc_snu')
-    .order('data', { ascending: false })
-    .limit(7);
+export async function getDashboardStats(): Promise<any> {
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
-  const { data: treningi, error: tError } = await supabase
-    .from('treningi')
-    .select('dystans, czas_minuty, tetno_srednie, kadencja_srednia')
-    .gte('data', thirtyDaysAgo);
-
-  if (pError || tError) {
-    console.error("Błąd getDashboardStats:", pError || tError);
+  // Jeśli użytkownik nie jest zalogowany, zwracamy zerowe statystyki
+  if (authError || !user) {
     return {
       avgWeight: 0,
       avgHrv: 0,
@@ -234,88 +239,106 @@ export async function getDashboardStats(): Promise<{
       totalWorkouts: 0,
       totalKm: 0,
       avgHr: 0,
-      avgCadence: 0,
-      srednia_waga: 0,
-      sredni_hrv: 0,
-      srednia_jakosc_snu: 0,
-      suma_dystans: 0,
-      suma_czas_minuty: 0,
+      avgCadence: 0
     };
   }
 
-  // Średnie z poranków
-  const avgWeight = poranki && poranki.length > 0
-    ? poranki.reduce((acc: number, p: any) => acc + Number(p.waga || 0), 0) / poranki.length
-    : 0;
+  // 1. Pobieramy poranki z ostatnich 7 dni dla zalogowanego użytkownika
+  const siedemDniTemu = new Date();
+  siedemDniTemu.setDate(siedemDniTemu.getDate() - 7);
+  const data7 = siedemDniTemu.toISOString().split('T')[0];
 
-  const avgHrv = poranki && poranki.length > 0
-    ? poranki.reduce((acc: number, p: any) => acc + Number(p.hrv || 0), 0) / poranki.length
-    : 0;
+  const { data: poranki } = await supabase
+    .from('poranki')
+    .select('waga, hrv, jakosc_snu')
+    .eq('user_id', user.id)
+    .gte('data', data7);
 
-  const avgSleep = poranki && poranki.length > 0
-    ? poranki.reduce((acc: number, p: any) => acc + Number(p.jakosc_snu || 0), 0) / poranki.length
-    : 0;
+  let avgWeight = 0;
+  let avgHrv = 0;
+  let avgSleep = 0;
 
-  // Statystyki treningowe (ostatnie 30 dni)
-  const totalWorkouts = treningi ? treningi.length : 0;
+  if (poranki && poranki.length > 0) {
+    const weights = poranki.map(p => Number(p.waga)).filter(w => w > 0);
+    const hrvs = poranki.map(p => Number(p.hrv)).filter(h => h > 0);
+    const sleeps = poranki.map(p => Number(p.jakosc_snu)).filter(s => s > 0);
 
-  const totalKm = treningi
-    ? treningi.reduce((acc: number, t: any) => acc + Number(t.dystans || 0), 0)
-    : 0;
+    if (weights.length > 0) avgWeight = Number((weights.reduce((a, b) => a + b, 0) / weights.length).toFixed(1));
+    if (hrvs.length > 0) avgHrv = Math.round(hrvs.reduce((a, b) => a + b, 0) / hrvs.length);
+    if (sleeps.length > 0) avgSleep = Math.round(sleeps.reduce((a, b) => a + b, 0) / sleeps.length);
+  }
 
-  const workoutsWithHr = treningi ? treningi.filter((t: any) => t.tetno_srednie) : [];
-  const avgHr = workoutsWithHr.length > 0
-    ? workoutsWithHr.reduce((acc: number, t: any) => acc + Number(t.tetno_srednie), 0) / workoutsWithHr.length
-    : 0;
+  // 2. Pobieramy treningi z ostatnich 30 dni dla zalogowanego użytkownika
+  const trzydziesciDniTemu = new Date();
+  trzydziesciDniTemu.setDate(trzydziesciDniTemu.getDate() - 30);
+  const data30 = trzydziesciDniTemu.toISOString().split('T')[0];
 
-  const workoutsWithCadence = treningi ? treningi.filter((t: any) => t.kadencja_srednia) : [];
-  const avgCadence = workoutsWithCadence.length > 0
-    ? workoutsWithCadence.reduce((acc: number, t: any) => acc + Number(t.kadencja_srednia), 0) / workoutsWithCadence.length
-    : 0;
+  const { data: treningi } = await supabase
+    .from('treningi')
+    .select('dystans, tetno_srednie, kadencja_srednia')
+    .eq('user_id', user.id)
+    .gte('data', data30);
+
+  let totalWorkouts = 0;
+  let totalKm = 0;
+  let avgHr = 0;
+  let avgCadence = 0;
+
+  if (treningi && treningi.length > 0) {
+    totalWorkouts = treningi.length;
+    
+    const distances = treningi.map(t => Number(t.dystans)).filter(d => d > 0);
+    const hrs = treningi.map(t => Number(t.tetno_srednie)).filter(h => h > 0);
+    const cadences = treningi.map(t => Number(t.kadencja_srednia)).filter(c => c > 0);
+
+    totalKm = Number(distances.reduce((a, b) => a + b, 0).toFixed(1));
+    if (hrs.length > 0) avgHr = Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length);
+    if (cadences.length > 0) avgCadence = Math.round(cadences.reduce((a, b) => a + b, 0) / cadences.length);
+  }
 
   return {
-    // Angielskie klucze (oczekiwane przez błędy w page.tsx)
-    avgWeight: parseFloat(avgWeight.toFixed(1)),
-    avgHrv: Math.round(avgHrv),
-    avgSleep: Math.round(avgSleep),
+    avgWeight,
+    avgHrv,
+    avgSleep,
     totalWorkouts,
-    totalKm: parseFloat(totalKm.toFixed(1)),
-    avgHr: Math.round(avgHr),
-    avgCadence: Math.round(avgCadence),
-
-    // Polskie klucze (zgodność wsteczna)
-    srednia_waga: parseFloat(avgWeight.toFixed(1)),
-    sredni_hrv: Math.round(avgHrv),
-    srednia_jakosc_snu: Math.round(avgSleep),
-    suma_dystans: parseFloat(totalKm.toFixed(1)),
-    suma_czas_minuty: treningi ? treningi.reduce((acc: number, t: any) => acc + Number(t.czas_minuty || 0), 0) : 0
+    totalKm,
+    avgHr,
+    avgCadence
   };
 }
 
 // Pobiera ostatnią analizę poranka i ostatnią analizę treningu jako jeden obiekt z dwoma polami
-export async function getLatestAnalyses(): Promise<{
-  morningAnalysis: string | null;
-  workoutAnalysis: string | null;
-}> {
-  const { data: poranek } = await supabase
+export async function getLatestAnalyses(): Promise<{ morningAnalysis: string | null, workoutAnalysis: string | null }> {
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return { morningAnalysis: null, workoutAnalysis: null };
+  }
+
+  // Najnowsza odprawa poranna tego użytkownika
+  const { data: morningData } = await supabase
     .from('poranki')
     .select('ai_analiza')
+    .eq('user_id', user.id)
     .not('ai_analiza', 'is', null)
     .order('data', { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  const { data: trening } = await supabase
+  // Najnowsza odprawa treningowa tego użytkownika
+  const { data: workoutData } = await supabase
     .from('treningi')
     .select('ai_analiza')
+    .eq('user_id', user.id)
     .not('ai_analiza', 'is', null)
     .order('data', { ascending: false })
     .limit(1)
     .maybeSingle();
 
   return {
-    morningAnalysis: poranek?.ai_analiza || null,
-    workoutAnalysis: trening?.ai_analiza || null
+    morningAnalysis: morningData?.ai_analiza || null,
+    workoutAnalysis: workoutData?.ai_analiza || null
   };
 }
 
@@ -325,9 +348,17 @@ export async function getLatestAnalyses(): Promise<{
 
 // Pobiera pojedynczy trening, który nie został jeszcze oceniony przez AI
 export async function getUnsentWorkout(): Promise<any | null> {
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return null;
+  }
+
   const { data, error } = await supabase
     .from('treningi')
     .select('*')
+    .eq('user_id', user.id)
     .eq('wyslano', false)
     .order('data', { ascending: false })
     .limit(1)
@@ -337,6 +368,7 @@ export async function getUnsentWorkout(): Promise<any | null> {
     console.error("Błąd getUnsentWorkout:", error);
     return null;
   }
+
   return data;
 }
 
@@ -659,4 +691,13 @@ export async function clearChatHistory(): Promise<{ success: boolean }> {
 
   revalidatePath('/');
   return { success: true };
+}
+
+export async function logout(): Promise<void> {
+  const supabase = await createClient();
+  await supabase.auth.signOut();
+  
+  // Czyścimy cache strony głównej i odsyłamy do ekranu logowania
+  revalidatePath('/', 'layout');
+  redirect('/login');
 }

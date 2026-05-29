@@ -4,31 +4,35 @@ import {
   getDashboardStats, 
   getLatestAnalyses, 
   saveMorningReport, 
-  sendWorkoutToAI 
+  sendWorkoutToAI,
+  logout
 } from './actions';
 import StravaSyncButton from '@/components/StravaSyncButton';
 import TrainerChat from '@/components/TrainerChat';
 import { SubmitButton } from './submit-button';
-
-// --- DODAJEMY TE DWIE IMPORTY ---
 import { redirect } from 'next/navigation';
 import { createClient } from '@/utils/supabase/server';
 
 export const dynamic = 'force-dynamic'; 
 
 export default async function Page() {
-  // --- DODAJEMY TĘ DIAGNOSTYKĘ I WARUNEK ---
   const supabase = await createClient();
   const { data: { user }, error } = await supabase.auth.getUser();
 
   if (error || !user) {
-    // Jeśli użytkownik nie jest zalogowany (lub sesja wygasła), odsyłamy do logowania
     redirect('/login');
   }
 
-  // --- TUTAJ DALEJ IDZIE TWÓJ DOTYCHCZASOWY KOD ---
-  // (np. pobieranie danych typu: const stats = await getDashboardStats()...)
-  // 1. Pobieranie danych asynchronicznie bezpośrednio w Server Component
+  // Pobieramy imię zalogowanej osoby z tabeli profile do dynamicznego nagłówka
+  const { data: profile } = await supabase
+    .from('profile')
+    .select('imie')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  const nazwaZalogowanego = profile?.imie || 'Zawodnik';
+
+  // Pobieranie danych asynchronicznie bezpośrednio w Server Component
   const todayReport = await getTodayMorningReport();
   const unsentWorkout = await getUnsentWorkout();
   const stats = await getDashboardStats();
@@ -45,13 +49,33 @@ export default async function Page() {
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-6 md:p-8">
+      
+      {/* GÓRNY PASEK SESJI I LOGOUT (Dopasowany do ciemnego motywu) */}
+      <div className="max-w-6xl mx-auto mb-6 flex flex-col sm:flex-row justify-between items-center gap-2 py-2.5 px-4 bg-slate-900/40 border border-slate-800/80 rounded-xl text-xs">
+        <div className="flex items-center space-x-2">
+          <span className="text-slate-400">Zalogowany jako:</span>
+          <strong className="text-orange-500 font-bold">{nazwaZalogowanego}</strong>
+          <span className="text-slate-500">({user.email})</span>
+        </div>
+        <form action={logout}>
+          <button 
+            type="submit" 
+            className="px-3.5 py-1.5 bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 text-[11px] font-semibold text-slate-300 rounded-lg transition-all active:scale-95 cursor-pointer"
+          >
+            Wyloguj się
+          </button>
+        </form>
+      </div>
+
       {/* NAGŁÓWEK PORTALU */}
       <div className="max-w-6xl mx-auto mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-800 pb-6">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-slate-500 sm:text-slate-100 flex items-center gap-2">
+          <h1 className="text-3xl font-extrabold tracking-tight text-slate-100 flex items-center gap-2">
             CEL 75 <span className="text-xl">🚴‍♂️</span>
           </h1>
-          <p className="text-slate-400 text-sm mt-1">Portal biologiczno-treningowy Huberta</p>
+          <p className="text-slate-400 text-sm mt-1">
+            Portal biologiczno-treningowy dla zawodnika: <strong className="text-slate-300">{nazwaZalogowanego}</strong>
+          </p>
         </div>
         
         {/* Synchronizacja ze Stravą */}
@@ -206,7 +230,7 @@ export default async function Page() {
                 )}
               </div>
             ) : (
-              // Widok ODBLOKOWANY (Hubert jeszcze nie wysłał dzisiejszego raportu)
+              // Widok ODBLOKOWANY (Kamil / Hubert jeszcze nie wysłał dzisiejszego raportu)
               <div>
                 <h2 className="text-lg font-bold text-slate-200 mb-2 flex items-center gap-2">
                   📝 Poranny raport biologiczny
