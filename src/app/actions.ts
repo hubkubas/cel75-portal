@@ -131,15 +131,21 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
 
   if (profileError) {
     console.log("-> [BŁĄD] Nie udało się pobrać profilu z bazy:", profileError.message);
-  } else {
-    console.log("-> Pomyślnie pobrano profil. Zawodnik:", profile?.imie, ", wiek:", profile?.wiek);
   }
 
   const imie = profile?.imie || 'zawodnik';
   const wiek = profile?.wiek || '';
   const zone2 = profile?.strefy_tetna?.zone2 || { min: 105, max: 115 };
   const kadencja = profile?.strefy_tetna?.kadencja_target || 90;
-  const filozofia = profile?.filozofia_treningowa || 'Mitochondrialna baza (Zone 2) oparta o założenia dr. Iñigo San-Millána';
+  
+  // Nowe dynamiczne parametry profilu
+  const glownaDyscyplina = profile?.glowna_dyscyplina || 'Rower';
+  const celWagowy = profile?.cel_wagowy || 'Utrzymanie wagi';
+  const poziom = profile?.poziom_zaawansowania || 'Początkujący';
+  const oczekiwania = profile?.oczekiwania_od_trenera || 'Spokojne i wspierające doradztwo';
+  const celeSportowe = profile?.cele_sportowe || 'Zdrowie i sprawność';
+
+  console.log(`-> Wybrana dyscyplina: ${glownaDyscyplina}, Cel wagowy: ${celWagowy}, Oczekiwania: ${oczekiwania}`);
 
   let aiAnaliza = "";
   try {
@@ -148,28 +154,77 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
     
     if (apiKey) {
       console.log("-> Łączę się z Gemini API...");
+      
       const prompt = `Przeanalizuj dzisiejszy poranek zawodnika o imieniu ${imie}:
       Waga: ${waga} kg
       HRV: ${hrv} ms
       Body Battery: ${body_battery}
       Jakość snu: ${jakosc_snu}/100
       Czas na trening dzisiaj: ${czas_na_trening} minut
-      Notatki użytkownika: ${notatki || 'brak'}
-      
-      Przygotuj długą, pełną pasji i kolarskich emotikonów odprawę od Trenera z Wozu Technicznego, w tym zarys menu (diety) oraz precyzyjne zlecenie treningowe na dzisiejsze ${czas_na_trening} minut.`;
+      Notatki użytkownika: ${notatki || 'brak'}`;
 
-      const dynamicSystemInstruction = `
-        Jesteś wybitnym Trenerem AI, Dyrektorem Sportowym oraz ekspertem w dziedzinie fizjologii sportu i zdrowia mitochondrialnego. 
-        Twój podopieczny to ${imie}${wiek ? `, wiek: ${wiek} lat` : ''}.
-        Główna filozofia treningowa: ${filozofia}.
+      // --- DYNAMICZNY GENERATOR OSOBOWOŚCI TRENERA (PERSONAS) ---
+      let dynamicSystemInstruction = "";
 
-        Kluczowe parametry treningowe dla tego zawodnika:
-        - Strefa 2 (Zone 2) tętna wynosi: ${zone2.min}-${zone2.max} bpm.
-        - Docelowa kadencja w Zone 2: ${kadencja}+ RPM.
-        - Unikaj "No Man's Land" (Strefa 3), chroniąc organizm zawodnika przed zbędnym obciążeniem, chyba że wskaźniki biologiczne wskazują na wysoką gotowość.
+      if (glownaDyscyplina === 'Rower') {
+        dynamicSystemInstruction = `
+          Jesteś wybitnym Trenerem Kolarskim, Dyrektorem Sportowym z Wozu Technicznego oraz ekspertem w dziedzinie fizjologii sportu dr. Iñigo San-Millána.
+          Twój podopieczny to ${imie}, wiek: ${wiek} lat.
+          Poziom zaawansowania: ${poziom}.
+          Cel wagowy: ${celWagowy}.
+          Cele sportowe zawodnika: ${celeSportowe}.
+          Twoje oczekiwane podejście: ${oczekiwania}.
 
-        Analizuj codzienne raporty poranne i treningi w stylu „Dyrektora Sportowego w wozie technicznym” – merytorycznie, z kolarskim humorem, motywująco, ale rygorystycznie opierając się na danych o tętnie i HRV.
-      `;
+          Kluczowe zalecenia kolarskie:
+          - Fundamentem jest Strefa 2 (Zone 2) tętna, która dla tego zawodnika wynosi: ${zone2.min}-${zone2.max} bpm.
+          - Docelowa kadencja kolarska: ${kadencja}+ RPM.
+          - Unikaj Strefy 3 (No Man's Land) – ma jeździć albo bardzo lekko w Zone 2, albo robić ostre interwały Zone 5 (jeśli HRV i sen są wysokie).
+          - Komunikuj się z pasją, kolarskim humorem, używaj dużo emotikonów (🚴‍♂️, 📻, 🚀, 🥞), stylizuj wypowiedź na odprawę przez radio z wozu technicznego.
+        `;
+      } 
+      else if (glownaDyscyplina === 'Bieg') {
+        dynamicSystemInstruction = `
+          Jesteś profesjonalnym Trenerem Biegowym, fizjoterapeutą sportowym oraz ekspertem ds. biomechaniki biegu i treningu maratońskiego.
+          Twój podopieczny to ${imie}, wiek: ${wiek} lat.
+          Poziom zaawansowania: ${poziom}.
+          Cel wagowy: ${celWagowy}.
+          Cele sportowe zawodnika: ${celeSportowe}.
+          Twoje oczekiwane podejście: ${oczekiwania}.
+
+          Kluczowe zalecenia biegowe:
+          - Unikaj przeciążeń stawów kolanowych i skokowych. Kładź nacisk na prawidłową technikę, kadencję biegową (ok. 170-180 kroków/min) i stabilizację.
+          - Strefa regeneracyjna tętna w biegu dla niego to: ${zone2.min}-${zone2.max} bpm (bieg konwersacyjny, zapobiegający zakwaszeniu).
+          - Podpowiadaj odpowiednią rozgrzewkę i rolowanie po biegu.
+          - Komunikuj się z pasją, motywująco, ale z dużą uwagą na kwestie fizjoterapeutyczne, stawy i mądre rozkładanie sił. Używaj biegowych emotikonów (🏃‍♂️, 👟, ⏱️, 🍌).
+        `;
+      } 
+      else if (glownaDyscyplina === 'Marsz/Spacer' || glownaDyscyplina === 'Senior') {
+        dynamicSystemInstruction = `
+          Jesteś ciepłym, opiekuńczym Mentorem Zdrowotnym, ekspertem ds. medycyny długowieczności (longevity) oraz sprawności funkcjonalnej seniorów.
+          Twój podopieczny to ${imie}, wiek: ${wiek} lat.
+          Poziom zaawansowania: Rekreacja i zdrowie.
+          Cel wagowy: ${celWagowy}.
+          Cele sportowe: ${celeSportowe}.
+          Twoje podejście: Bardzo wspierające, cierpliwe, pełne empatii i ciepła (żadnej presji na wyniki!).
+
+          Kluczowe zalecenia geriatryczne i ruchowe:
+          - Główną formą aktywności są spacery, marsze rekreacyjne (power walking) oraz ćwiczenia oddechowe i równoważne.
+          - Tętno podczas marszu powinno być bardzo bezpieczne, łagodne dla serca (zalecany przedział: 90-105 bpm).
+          - Kładź nacisk na świeże powietrze, naturalne światło o poranku (rytmu dobowy), dbanie o stabilność stawów biodrowych i kolanowych oraz zapobieganie upadkom.
+          - Doradzaj łagodne rozciąganie po spacerze.
+          - Komunikuj się niezwykle uprzejmie, ciepło, używaj wspierających i pełnych szacunku emotikonów (🌳, 🚶‍♂️, ☀️, 🍵, 🌸). Chwal za każdy najmniejszy spacer i dbanie o zdrowie.
+        `;
+      } 
+      else {
+        // Domyślny trener ogólnorozwojowy
+        dynamicSystemInstruction = `
+          Jesteś wszechstronnym Trenerem Personalnym i doradcą zdrowotnym.
+          Twój podopieczny to ${imie}, wiek: ${wiek} lat.
+          Główna dyscyplina: ${glownaDyscyplina}.
+          Cel wagowy: ${celWagowy}.
+          Cele sportowe: ${celeSportowe}.
+        `;
+      }
 
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
@@ -197,7 +252,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
     console.error("-> [WYJĄTEK] Podczas kontaktu z Gemini:", err.message);
   }
 
-  console.log("-> Próbuję zapisać dane w tabeli 'poranki' w Supabase...");
+  // Zapisujemy poranek w bazie danych, dodając kluczowe pole "user_id"
   const { error: insertError } = await supabase
     .from('poranki')
     .insert([{
@@ -315,21 +370,30 @@ export async function getLatestAnalyses(): Promise<{ morningAnalysis: string | n
     return { morningAnalysis: null, workoutAnalysis: null };
   }
 
-  // Najnowsza odprawa poranna tego użytkownika
+  const dzis = new Date().toLocaleDateString('pl-PL', {
+    timeZone: 'Europe/Warsaw',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).split('.').reverse().join('-');
+
+  // Pobieramy najnowszą analizę poranka z dni POPRZEDNICH (data < dzis)
   const { data: morningData } = await supabase
     .from('poranki')
     .select('ai_analiza')
     .eq('user_id', user.id)
+    .lt('data', dzis) // strictly less than today
     .not('ai_analiza', 'is', null)
     .order('data', { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  // Najnowsza odprawa treningowa tego użytkownika
+  // Pobieramy najnowszą analizę treningu z dni POPRZEDNICH (data < dzis)
   const { data: workoutData } = await supabase
     .from('treningi')
     .select('ai_analiza')
     .eq('user_id', user.id)
+    .lt('data', dzis) // strictly less than today
     .not('ai_analiza', 'is', null)
     .order('data', { ascending: false })
     .limit(1)
@@ -694,4 +758,36 @@ export async function logout(): Promise<void> {
   // Czyścimy cache strony głównej i odsyłamy do ekranu logowania
   revalidatePath('/', 'layout');
   redirect('/login');
+}
+
+export async function getTodayWorkout(): Promise<any | null> {
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return null;
+  }
+
+  const dzis = new Date().toLocaleDateString('pl-PL', {
+    timeZone: 'Europe/Warsaw',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).split('.').reverse().join('-');
+
+  const { data, error } = await supabase
+    .from('treningi')
+    .select('*')
+    .eq('user_id', user.id)
+    .eq('data', dzis)
+    .eq('wyslano', true)
+    .not('ai_analiza', 'is', null)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Błąd getTodayWorkout:", error);
+    return null;
+  }
+
+  return data;
 }
