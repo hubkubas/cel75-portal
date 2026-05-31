@@ -12,7 +12,7 @@ import { createClient } from '@/utils/supabase/server';
  * Bezpiecznie generuje dzisiejszą datę w formacie YYYY-MM-DD (ISO)
  * ściśle dla polskiej strefy czasowej, bez podatności na różnice formatowania systemowego.
  */
-export function getWarsawDateString(): string {
+function getWarsawDateString(): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/Warsaw',
     year: 'numeric',
