@@ -484,110 +484,115 @@ export async function clearChatHistory(): Promise<void> {
   revalidatePath('/');
 }
 
-export async function sendChatMessage(content: string, imageBase64?: string): Promise<void> {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+export async function sendChatMessage(content: string, imageBase64?: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-  if (authError || !user) {
-    throw new Error("Brak autoryzacji do wysłania wiadomości.");
-  }
-
-  // Zapisujemy wiadomość użytkownika w bazie z jego user_id
-  await supabase
-    .from('czat_wiadomosci')
-    .insert([{
-      user_id: user.id,
-      rola: 'user',
-      tresc: content,
-      obrazek_base64: imageBase64 || null
-    }]);
-
-  const dzis = getWarsawDateString();
-
-  // Pobieramy pełny żywy kontekst użytkownika z bazy danych do zasilenia czatu (JEDEN MÓZG)
-  const { data: profile } = await supabase.from('profile').select('*').eq('id', user.id).maybeSingle();
-  const { data: todayReport } = await supabase.from('poranki').select('*').eq('user_id', user.id).eq('data', dzis).maybeSingle();
-  const { data: todayWorkout } = await supabase.from('treningi').select('*').eq('user_id', user.id).eq('data', dzis).maybeSingle();
-
-  // Logi diagnostyczne (pomocne podczas wdrożenia na Vercel)
-  console.log(`[DIAGNOSTYKA CZATU] Użytkownik: ${user.id}, Wyliczona data: ${dzis}`);
-  console.log(`[DIAGNOSTYKA CZATU] Znaleziono profil: ${!!profile}`);
-  console.log(`[DIAGNOSTYKA CZATU] Znaleziono dzisiejszy raport: ${!!todayReport}`);
-  console.log(`[DIAGNOSTYKA CZATU] Znaleziono dzisiejszy trening: ${!!todayWorkout}`);
-
-  const history = await getChatHistory();
-  const last10Messages = history.slice(-10);
-
-  const imie = profile?.imie || 'zawodnik';
-  const wiek = profile?.wiek || '';
-  const glownaDyscyplina = profile?.glowna_dyscyplina || 'Rower';
-  const celWagowy = profile?.cel_wagowy || 'Utrzymanie wagi';
-  const celeSportowe = profile?.cele_sportowe || 'Zdrowie';
-  const zone2 = profile?.strefy_tetna?.zone2 || { min: 105, max: 115 };
-
-  // System prompt czatu łączący całą wiedzę o zawodniku
-  const dynamicChatInstruction = `
-    Jesteś tym samym Osobistym Trenerem AI i ekspertem metabolicznym, który analizuje codzienne raporty poranne i treningi użytkownika: ${imie}.
-    Masz KATEGORYCZNY obowiązek znać jego aktualny stan zdrowotny i biologiczny na dzisiaj. Twoje odpowiedzi muszą być w pełni spójne z tym, co działo się rano i na treningu.
-
-    === PROFIL ZAWODNIKA ===
-    - Wiek: ${wiek} lat
-    - Główna dyscyplina: ${glownaDyscyplina}
-    - Cel sportowy: ${celeSportowe}
-    - Cel wagowy: ${celWagowy}
-    - Strefa 2 (Zone 2) tętna: ${zone2.min}-${zone2.max} bpm
-
-    === AKTUALNY STAN BIOLOGICZNY NA DZIŚ (${dzis}) ===
-    ${todayReport ? `
-    - Waga rano: ${todayReport.waga} kg
-    - HRV rano: ${todayReport.hrv} ms
-    - Body Battery: ${todayReport.body_battery}/100
-    - Jakość snu: ${todayReport.jakosc_snu}/100
-    - Zadeklarowany czas na aktywność: ${todayReport.czas_na_trening} minut
-    - ODPRAWA PORANNA KTÓRĄ MU JUŻ DZISIAJ WYGENEROWAŁEŚ (Użyj tej wiedzy!): 
-      "${todayReport.ai_analiza}"
-    ` : '- Zawodnik nie wysłał jeszcze dzisiejszego raportu porannego.'}
-
-    === AKTUALNY TRENING NA DZIŚ (${dzis}) ===
-    ${todayWorkout ? `
-    - Typ aktywności: ${todayWorkout.rodzaj}
-    - Dystans: ${todayWorkout.dystans} km
-    - Czas: ${todayWorkout.czas_minuty} min
-    - Średnie tętno: ${todayWorkout.tetno_srednie} bpm
-    - Średnia kadencja: ${todayWorkout.kadencja_srednia} RPM
-    - ANALIZA DZISIEJSZEGO TRENINGU, KTÓRĄ MU JUŻ WYGENEROWAŁEŚ (Użyj tej wiedzy!):
-      "${todayWorkout.ai_analiza}"
-    ` : '- Brak zarejestrowanego treningu na dziś w systemie.'}
-
-    === STYL ROZMOWY ===
-    - Odpowiadaj z pasją, merytorycznie, motywująco, stosując wiedzę dr. San-Millána o mitochondrialnym zdrowiu i żywieniu.
-    - Używaj kolarskich/sportowych emotikonów odpowiednich do profilu zawodnika.
-    - Jeśli zawodnik pyta o odżywianie, dietę, samopoczucie lub taktykę na dzisiejszy dzień, OPRZYJ SIĘ na powyższych danych biologicznych i treningowych z dzisiaj! Zachowaj pełną ciągłość wiedzy.
-  `;
-
-  const contents = last10Messages.map((msg, index) => {
-    const isLast = index === last10Messages.length - 1;
-    const parts: any[] = [{ text: msg.tresc }];
-    
-    if (isLast && msg.rola === 'user' && msg.obrazek_base64) {
-      const mimeType = msg.obrazek_base64.split(';')[0].split(':')[1];
-      const base64Data = msg.obrazek_base64.split(',')[1];
-      parts.push({
-        inlineData: {
-          mimeType,
-          data: base64Data
-        }
-      });
+    if (authError || !user) {
+      return { success: false, error: "Brak autoryzacji do wysłania wiadomości." };
     }
 
-    return {
-      role: msg.rola === 'user' ? 'user' : 'model',
-      parts
-    };
-  });
+    // Zapisujemy wiadomość użytkownika w bazie z jego user_id
+    const { error: insertUserError } = await supabase
+      .from('czat_wiadomosci')
+      .insert([{
+        user_id: user.id,
+        rola: 'user',
+        tresc: content,
+        obrazek_base64: imageBase64 || null
+      }]);
 
-  let aiResponseText = "";
-  try {
+    if (insertUserError) {
+      console.error("Błąd zapisu wiadomości użytkownika:", insertUserError);
+      return { success: false, error: "Nie udało się zapisać Twojej wiadomości." };
+    }
+
+    const dzis = getWarsawDateString();
+
+    // Pobieramy pełny żywy kontekst użytkownika z bazy danych do zasilenia czatu (JEDEN MÓZG)
+    const { data: profile } = await supabase.from('profile').select('*').eq('id', user.id).maybeSingle();
+    const { data: todayReport } = await supabase.from('poranki').select('*').eq('user_id', user.id).eq('data', dzis).maybeSingle();
+    const { data: todayWorkout } = await supabase.from('treningi').select('*').eq('user_id', user.id).eq('data', dzis).maybeSingle();
+
+    // Logi diagnostyczne (pomocne podczas wdrożenia na Vercel)
+    console.log(`[DIAGNOSTYKA CZATU] Użytkownik: ${user.id}, Wyliczona data: ${dzis}`);
+    console.log(`[DIAGNOSTYKA CZATU] Znaleziono profil: ${!!profile}`);
+    console.log(`[DIAGNOSTYKA CZATU] Znaleziono dzisiejszy raport: ${!!todayReport}`);
+    console.log(`[DIAGNOSTYKA CZATU] Znaleziono dzisiejszy trening: ${!!todayWorkout}`);
+
+    const history = await getChatHistory();
+    const last10Messages = history.slice(-10);
+
+    const imie = profile?.imie || 'zawodnik';
+    const wiek = profile?.wiek || '';
+    const glownaDyscyplina = profile?.glowna_dyscyplina || 'Rower';
+    const celWagowy = profile?.cel_wagowy || 'Utrzymanie wagi';
+    const celeSportowe = profile?.cele_sportowe || 'Zdrowie';
+    const zone2 = profile?.strefy_tetna?.zone2 || { min: 105, max: 115 };
+
+    // System prompt czatu łączący całą wiedzę o zawodniku
+    const dynamicChatInstruction = `
+      Jesteś tym samym Osobistym Trenerem AI i ekspertem metabolicznym, który analizuje codzienne raporty poranne i treningi użytkownika: ${imie}.
+      Masz KATEGORYCZNY obowiązek znać jego aktualny stan zdrowotny i biologiczny na dzisiaj. Twoje odpowiedzi muszą być w pełni spójne z tym, co działo się rano i na treningu.
+
+      === PROFIL ZAWODNIKA ===
+      - Wiek: ${wiek} lat
+      - Główna dyscyplina: ${glownaDyscyplina}
+      - Cel sportowy: ${celeSportowe}
+      - Cel wagowy: ${celWagowy}
+      - Strefa 2 (Zone 2) tętna: ${zone2.min}-${zone2.max} bpm
+
+      === AKTUALNY STAN BIOLOGICZNY NA DZIŚ (${dzis}) ===
+      ${todayReport ? `
+      - Waga rano: ${todayReport.waga} kg
+      - HRV rano: ${todayReport.hrv} ms
+      - Body Battery: ${todayReport.body_battery}/100
+      - Jakość snu: ${todayReport.jakosc_snu}/100
+      - Zadeklarowany czas na aktywność: ${todayReport.czas_na_trening} minut
+      - ODPRAWA PORANNA KTÓRĄ MU JUŻ DZISIAJ WYGENEROWAŁEŚ (Użyj tej wiedzy!): 
+        "${todayReport.ai_analiza}"
+      ` : '- Zawodnik nie wysłał jeszcze dzisiejszego raportu porannego.'}
+
+      === AKTUALNY TRENING NA DZIŚ (${dzis}) ===
+      ${todayWorkout ? `
+      - Typ aktywności: ${todayWorkout.rodzaj}
+      - Dystans: ${todayWorkout.dystans} km
+      - Czas: ${todayWorkout.czas_minuty} min
+      - Średnie tętno: ${todayWorkout.tetno_srednie} bpm
+      - Średnia kadencja: ${todayWorkout.kadencja_srednia} RPM
+      - ANALIZA DZISIEJSZEGO TRENINGU, KTÓRĄ MU JUŻ WYGENEROWAŁEŚ (Użyj tej wiedzy!):
+        "${todayWorkout.ai_analiza}"
+      ` : '- Brak zarejestrowanego treningu na dziś w systemie.'}
+
+      === STYL ROZMOWY ===
+      - Odpowiadaj z pasją, merytorycznie, motywująco, stosując wiedzę dr. San-Millána o mitochondrialnym zdrowiu i żywieniu.
+      - Używaj kolarskich/sportowych emotikonów odpowiednich do profilu zawodnika.
+      - Jeśli zawodnik pyta o odżywianie, dietę, samopoczucie lub taktykę na dzisiejszy dzień, OPRZYJ SIĘ na powyższych danych biologicznych i treningowych z dzisiaj! Zachowaj pełną ciągłość wiedzy.
+    `;
+
+    const contents = last10Messages.map((msg, index) => {
+      const isLast = index === last10Messages.length - 1;
+      const parts: any[] = [{ text: msg.tresc }];
+      
+      if (isLast && msg.rola === 'user' && msg.obrazek_base64) {
+        const mimeType = msg.obrazek_base64.split(';')[0].split(':')[1];
+        const base64Data = msg.obrazek_base64.split(',')[1];
+        parts.push({
+          inlineData: {
+            mimeType,
+            data: base64Data
+          }
+        });
+      }
+
+      return {
+        role: msg.rola === 'user' ? 'user' : 'model',
+        parts
+      };
+    });
+
+    let aiResponseText = "";
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
       const response = await fetch(
@@ -610,22 +615,29 @@ export async function sendChatMessage(content: string, imageBase64?: string): Pr
         console.error("Błąd czatu Gemini:", errText);
         aiResponseText = "Przepraszam, mam chwilowy problem z połączeniem z moją bazą wiedzy.";
       }
+    } else {
+      aiResponseText = "Brak skonfigurowanego klucza API dla trenera AI.";
     }
-  } catch (err) {
+
+    // Zapisujemy odpowiedź trenera w bazie z user_id
+    const { error: insertModelError } = await supabase
+      .from('czat_wiadomosci')
+      .insert([{
+        user_id: user.id,
+        rola: 'model',
+        tresc: aiResponseText
+      }]);
+
+    if (insertModelError) {
+      console.error("Błąd zapisu odpowiedzi trenera:", insertModelError);
+    }
+
+    revalidatePath('/');
+    return { success: true };
+  } catch (err: any) {
     console.error("Wyjątek czatu Gemini:", err);
-    aiResponseText = "Przepraszam, mój wóz techniczny napotkał zakłócenia radiowe.";
+    return { success: false, error: err?.message || "Wystąpił nieoczekiwany błąd komunikacji." };
   }
-
-  // Zapisujemy odpowiedź trenera w bazie z user_id
-  await supabase
-    .from('czat_wiadomosci')
-    .insert([{
-      user_id: user.id,
-      rola: 'model',
-      tresc: aiResponseText
-    }]);
-
-  revalidatePath('/');
 }
 
 // ==========================================
