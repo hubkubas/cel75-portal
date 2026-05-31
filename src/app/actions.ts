@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/utils/supabase/server';
 
 // ==========================================
-// TYPY I INTERFEJSY (SaaS) no włąśnie
+// TYPY I INTERFEJSY (SaaS)
 // ==========================================
 
 export interface Message {
@@ -206,7 +206,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
           Kluczowe zalecenia geriatryczne i ruchowe:
           - Główną formą aktywności są marsze rekreacyjne, spacery oraz ćwiczenia równowagi.
           - Tętno podczas marszu powinno być bezpieczne, łagodne dla serca (90-105 bpm).
-          - Używaj wspierających emotikonów (🌳, 🚶‍♂️, ☀️, 🍵).
+          - Używaj wspierających emotikonów (YT: 🌳, 🚶‍♂️, ☀️, 🍵).
 
           KATEGORYCZNY WYMÓG STRUKTURY ODPOWIEDZI (Używaj dokładnie tych nagłówków Markdown):
           
@@ -329,7 +329,6 @@ export async function getDashboardStats(): Promise<any> {
     
     const distances = treningi.map(t => Number(t.dystans)).filter(d => d > 0);
     const hrs = treningi.map(t => Number(t.tetno_srednie)).filter(h => h > 0);
-    // POPRAWIONO: Literówka usunięta definitywnie (została tylko kadencja)
     const cadences = treningi.map(t => Number(t.kadencja_srednia)).filter(c => c > 0);
 
     totalKm = Number(distances.reduce((a, b) => a + b, 0).toFixed(1));
@@ -745,10 +744,12 @@ export async function sendWorkoutToAI(trainingId: number): Promise<void> {
   revalidatePath('/');
 }
 
-export async function syncStravaWorkoutsAction(): Promise<void> {
+export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; count?: number; error?: string }> {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) throw new Error("Brak autoryzacji");
+  if (authError || !user) {
+    return { success: false, error: "Brak autoryzacji" };
+  }
 
   try {
     const { data: profile } = await supabase
@@ -762,8 +763,7 @@ export async function syncStravaWorkoutsAction(): Promise<void> {
     const clientSecret = process.env.STRAVA_CLIENT_SECRET;
 
     if (!refreshToken || !clientId || !clientSecret) {
-      console.warn("Brak skonfigurowanych kluczy Strava OAuth.");
-      return;
+      return { success: false, error: "Brak skonfigurowanych kluczy Strava OAuth." };
     }
 
     const tokenResponse = await fetch('https://www.strava.com/oauth/token', {
@@ -778,8 +778,7 @@ export async function syncStravaWorkoutsAction(): Promise<void> {
     });
 
     if (!tokenResponse.ok) {
-      console.error("Błąd autoryzacji Strava");
-      return;
+      return { success: false, error: "Błąd autoryzacji Strava." };
     }
 
     const tokenData = await tokenResponse.json() as any;
@@ -794,8 +793,7 @@ export async function syncStravaWorkoutsAction(): Promise<void> {
     );
 
     if (!activitiesResponse.ok) {
-      console.error("Błąd pobierania aktywności Strava");
-      return;
+      return { success: false, error: "Błąd pobierania aktywności Strava." };
     }
 
     const activities = await activitiesResponse.json() as any[];
@@ -829,6 +827,7 @@ export async function syncStravaWorkoutsAction(): Promise<void> {
         };
       });
 
+    let count = 0;
     if (newWorkouts.length > 0) {
       const { error: insertError } = await supabase
         .from('treningi')
@@ -836,15 +835,17 @@ export async function syncStravaWorkoutsAction(): Promise<void> {
 
       if (insertError) {
         console.error("Błąd zapisu nowych treningów ze Stravy:", insertError);
-      } else {
-        console.log(`Pomyślnie zsynchronizowano ${newWorkouts.length} nowych treningów.`);
+        return { success: false, error: "Błąd zapisu nowych treningów w bazie danych." };
       }
+      count = newWorkouts.length;
     }
-  } catch (err) {
-    console.error("Wyjątek podczas synchronizacji Stravy:", err);
-  }
 
-  revalidatePath('/');
+    revalidatePath('/');
+    return { success: true, count };
+  } catch (err: any) {
+    console.error("Wyjątek podczas synchronizacji Stravy:", err);
+    return { success: false, error: err?.message || "Wystąpił nieoczekiwany błąd połączenia." };
+  }
 }
 
 export async function analyzeTrainingAction(id: number): Promise<string> {
