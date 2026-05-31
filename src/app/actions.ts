@@ -5,6 +5,19 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/utils/supabase/server';
 
 // ==========================================
+// TYPY I INTERFEJSY (SaaS)
+// ==========================================
+
+export interface Message {
+  id?: number;
+  created_at?: string;
+  user_id?: string;
+  rola: string; // 'user' | 'model'
+  tresc: string;
+  obrazek_base64?: string | null;
+}
+
+// ==========================================
 // FUNKCJE POMOCNICZE (BEZPIECZNE FORMATOWANIE DATY)
 // ==========================================
 
@@ -316,6 +329,7 @@ export async function getDashboardStats(): Promise<any> {
     
     const distances = treningi.map(t => Number(t.dystans)).filter(d => d > 0);
     const hrs = treningi.map(t => Number(t.tetno_srednie)).filter(h => h > 0);
+    // Poprawiona literówka (usunięto t.getDashboardStats)
     const cadences = treningi.map(t => Number(t.kadencja_srednia)).filter(c => c > 0);
 
     totalKm = Number(distances.reduce((a, b) => a + b, 0).toFixed(1));
@@ -451,7 +465,7 @@ export async function getRecentWorkouts(): Promise<any[]> {
 // IV. MULTIMEDIALNY CZAT Z TRENEREM AI (JEDEN MÓZG)
 // ==========================================
 
-export async function getChatHistory(): Promise<any[]> {
+export async function getChatHistory(): Promise<Message[]> {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
 
@@ -467,7 +481,8 @@ export async function getChatHistory(): Promise<any[]> {
     console.error("Błąd getChatHistory:", error);
     return [];
   }
-  return data || [];
+  // Rzutowanie typu as Message[] w celu zapewnienia pełnej zgodności z kompilatorem TS
+  return (data as Message[]) || [];
 }
 
 export async function clearChatHistory(): Promise<void> {
@@ -561,7 +576,7 @@ export async function sendChatMessage(content: string, imageBase64?: string): Pr
       - Czas: ${todayWorkout.czas_minuty} min
       - Średnie tętno: ${todayWorkout.tetno_srednie} bpm
       - Średnia kadencja: ${todayWorkout.kadencja_srednia} RPM
-      - ANALIZA DZISIEJSZEGO TRENINGU, KTÓRĄ MU JUŻ WYGENEROWAŁEŚ (Użyj tej wiedzy!):
+      - ANALIZA DZISIEJSZEGO TRENINGU, KTÓRĄ MU WYGENEROWAŁEŚ (Użyj tej wiedzy!):
         "${todayWorkout.ai_analiza}"
       ` : '- Brak zarejestrowanego treningu na dziś w systemie.'}
 
