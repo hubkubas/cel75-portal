@@ -10,18 +10,15 @@ import { createClient } from '@/utils/supabase/server';
 
 /**
  * Bezpiecznie generuje dzisiejszą datę w formacie YYYY-MM-DD (ISO)
- * ściśle dla polskiej strefy czasowej, bez podatności na różnice formatowania systemowego.
+ * ściśle dla polskiej strefy czasowej, bez słowa kluczowego "export"
+ * w celu uniknięcia błędów kompilacji Next.js Server Actions.
  */
 function getWarsawDateString(): string {
-  // 1. Pobieramy datę/czas w strefie polskiej jako ciąg
   const warsawString = new Date().toLocaleString("en-US", { timeZone: "Europe/Warsaw" });
   const warsawDate = new Date(warsawString);
-  
-  // 2. Ręcznie i twardo składamy format YYYY-MM-DD
   const yyyy = warsawDate.getFullYear();
   const mm = String(warsawDate.getMonth() + 1).padStart(2, '0');
   const dd = String(warsawDate.getDate()).padStart(2, '0');
-  
   return `${yyyy}-${mm}-${dd}`;
 }
 
