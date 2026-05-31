@@ -5,6 +5,23 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/utils/supabase/server';
 
 // ==========================================
+// FUNKCJE POMOCNICZE (BEZPIECZNE FORMATOWANIE DATY)
+// ==========================================
+
+/**
+ * Bezpiecznie generuje dzisiejszą datę w formacie YYYY-MM-DD (ISO)
+ * ściśle dla polskiej strefy czasowej, bez podatności na różnice formatowania systemowego.
+ */
+export function getWarsawDateString(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Warsaw',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
+}
+
+// ==========================================
 // I. AUTORYZACJA I PROFIL UŻYTKOWNIKA (SaaS)
 // ==========================================
 
@@ -29,12 +46,7 @@ export async function getTodayMorningReport(): Promise<any | null> {
     return null;
   }
 
-  const dzis = new Date().toLocaleDateString('pl-PL', {
-    timeZone: 'Europe/Warsaw',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).split('.').reverse().join('-');
+  const dzis = getWarsawDateString();
 
   // Pobieramy raport na dziś, ale TYLKO dla zalogowanego użytkownika
   const { data, error } = await supabase
@@ -63,12 +75,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
   }
   console.log("-> Zalogowany użytkownik ID:", user.id);
 
-  const dzis = new Date().toLocaleDateString('pl-PL', {
-    timeZone: 'Europe/Warsaw',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).split('.').reverse().join('-');
+  const dzis = getWarsawDateString();
   console.log("-> Wyliczona dzisiejsza data polska:", dzis);
 
   // Sprawdzamy czy raport istnieje dla tego użytkownika
@@ -334,12 +341,7 @@ export async function getLatestAnalyses(): Promise<{ morningAnalysis: string | n
     return { morningAnalysis: null, workoutAnalysis: null };
   }
 
-  const dzis = new Date().toLocaleDateString('pl-PL', {
-    timeZone: 'Europe/Warsaw',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).split('.').reverse().join('-');
+  const dzis = getWarsawDateString();
 
   // Pobieramy najnowszą analizę poranka z dni POPRZEDNICH (data < dzis)
   const { data: morningData } = await supabase
@@ -402,12 +404,7 @@ export async function getTodayWorkout(): Promise<any | null> {
     return null;
   }
 
-  const dzis = new Date().toLocaleDateString('pl-PL', {
-    timeZone: 'Europe/Warsaw',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).split('.').reverse().join('-');
+  const dzis = getWarsawDateString();
 
   const { data, error } = await supabase
     .from('treningi')
@@ -504,17 +501,18 @@ export async function sendChatMessage(content: string, imageBase64?: string): Pr
       obrazek_base64: imageBase64 || null
     }]);
 
-  const dzis = new Date().toLocaleDateString('pl-PL', {
-    timeZone: 'Europe/Warsaw',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).split('.').reverse().join('-');
+  const dzis = getWarsawDateString();
 
   // Pobieramy pełny żywy kontekst użytkownika z bazy danych do zasilenia czatu (JEDEN MÓZG)
   const { data: profile } = await supabase.from('profile').select('*').eq('id', user.id).maybeSingle();
   const { data: todayReport } = await supabase.from('poranki').select('*').eq('user_id', user.id).eq('data', dzis).maybeSingle();
   const { data: todayWorkout } = await supabase.from('treningi').select('*').eq('user_id', user.id).eq('data', dzis).maybeSingle();
+
+  // Logi diagnostyczne (pomocne podczas wdrożenia na Vercel)
+  console.log(`[DIAGNOSTYKA CZATU] Użytkownik: ${user.id}, Wyliczona data: ${dzis}`);
+  console.log(`[DIAGNOSTYKA CZATU] Znaleziono profil: ${!!profile}`);
+  console.log(`[DIAGNOSTYKA CZATU] Znaleziono dzisiejszy raport: ${!!todayReport}`);
+  console.log(`[DIAGNOSTYKA CZATU] Znaleziono dzisiejszy trening: ${!!todayWorkout}`);
 
   const history = await getChatHistory();
   const last10Messages = history.slice(-10);
