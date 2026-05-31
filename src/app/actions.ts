@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/utils/supabase/server';
 
 // ==========================================
-// TYPY I INTERFEJSY (SaaS)
+// TYPY I INTERFEJSY (SaaS) no włąśnie
 // ==========================================
 
 export interface Message {
