@@ -13,12 +13,16 @@ import { createClient } from '@/utils/supabase/server';
  * ściśle dla polskiej strefy czasowej, bez podatności na różnice formatowania systemowego.
  */
 function getWarsawDateString(): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Warsaw',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).format(new Date());
+  // 1. Pobieramy datę/czas w strefie polskiej jako ciąg (wymusza odpowiednie przesunięcie)
+  const warsawString = new Date().toLocaleString("en-US", { timeZone: "Europe/Warsaw" });
+  const warsawDate = new Date(warsawString);
+  
+  // 2. Ręcznie i twardo składamy format YYYY-MM-DD (zawsze dodając zera, np. "05")
+  const yyyy = warsawDate.getFullYear();
+  const mm = String(warsawDate.getMonth() + 1).padStart(2, '0');
+  const dd = String(warsawDate.getDate()).padStart(2, '0');
+  
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 // ==========================================
