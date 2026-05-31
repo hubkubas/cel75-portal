@@ -193,7 +193,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
           
           # 🏃‍♂️ Zadanie biegowe na dziś (Dziś biegamy przez ${czas_na_trening} minut)
           
-          # 🥞 PROTOKÓŁ DIETETYCZNY I ODŻYWIANIE (Przed, w trakcie i po biegu)
+          # 🥞 PROTOKÓŁ DIETETYCYJNY I ODŻYWIANIE (Przed, w trakcie i po biegu)
           - Rozpisz dokładnie węglowodanowe śniadanie biegowe, nawodnienie i odżywianie w trakcie biegu oraz potreningowy shake białkowo-węglowodanowy na regenerację.
         `;
       } 
@@ -206,7 +206,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
           Kluczowe zalecenia geriatryczne i ruchowe:
           - Główną formą aktywności są marsze rekreacyjne, spacery oraz ćwiczenia równowagi.
           - Tętno podczas marszu powinno być bezpieczne, łagodne dla serca (90-105 bpm).
-          - Używaj wspierających emotikonów (YT: 🌳, 🚶‍♂️, ☀️, 🍵).
+          - Używaj wspierających emotikonów (🌳, 🚶‍♂️, ☀️, 🍵).
 
           KATEGORYCZNY WYMÓG STRUKTURY ODPOWIEDZI (Używaj dokładnie tych nagłówków Markdown):
           
@@ -744,7 +744,7 @@ export async function sendWorkoutToAI(trainingId: number): Promise<void> {
   revalidatePath('/');
 }
 
-export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; count?: number; error?: string }> {
+export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; importedCount?: number; error?: string }> {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) {
@@ -827,7 +827,7 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; co
         };
       });
 
-    let count = 0;
+    let importedCount = 0;
     if (newWorkouts.length > 0) {
       const { error: insertError } = await supabase
         .from('treningi')
@@ -837,11 +837,11 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; co
         console.error("Błąd zapisu nowych treningów ze Stravy:", insertError);
         return { success: false, error: "Błąd zapisu nowych treningów w bazie danych." };
       }
-      count = newWorkouts.length;
+      importedCount = newWorkouts.length;
     }
 
     revalidatePath('/');
-    return { success: true, count };
+    return { success: true, importedCount };
   } catch (err: any) {
     console.error("Wyjątek podczas synchronizacji Stravy:", err);
     return { success: false, error: err?.message || "Wystąpił nieoczekiwany błąd połączenia." };
