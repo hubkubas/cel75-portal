@@ -329,7 +329,7 @@ export async function getDashboardStats(): Promise<any> {
     
     const distances = treningi.map(t => Number(t.dystans)).filter(d => d > 0);
     const hrs = treningi.map(t => Number(t.tetno_srednie)).filter(h => h > 0);
-    // Poprawiona literówka (usunięto t.getDashboardStats)
+    // POPRAWIONO: Literówka usunięta definitywnie (została tylko kadencja)
     const cadences = treningi.map(t => Number(t.kadencja_srednia)).filter(c => c > 0);
 
     totalKm = Number(distances.reduce((a, b) => a + b, 0).toFixed(1));
