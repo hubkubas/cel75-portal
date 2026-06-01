@@ -418,15 +418,12 @@ export async function getTodayWorkout(): Promise<any | null> {
     return null;
   }
 
-  // ZMIANA KLUCZOWA: Zamiast szukać treningu strictly z dzisiejszą datą,
-  // pobieramy ABSOLUTNIE OSTATNI (najnowszy) trening zalogowanego użytkownika.
-  // Dzięki temu wczorajsze lub starsze treningi zaimportowane ze Stravy są widoczne na środku ekranu!
+  // Bezpieczne, pojedyncze sortowanie po dacie (od najnowszego)
   const { data, error } = await supabase
     .from('treningi')
     .select('*')
     .eq('user_id', user.id)
     .order('data', { ascending: false })
-    .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 
@@ -853,7 +850,8 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
 
       if (insertError) {
         console.error("Błąd zapisu nowych treningów ze Stravy:", insertError);
-        return { success: false, error: "Błąd zapisu nowych treningów w bazie danych." };
+        // DIAGNOSTYKA: Przekazujemy szczegółowy błąd PostgreSQL bezpośrednio do interfejsu użytkownika
+        return { success: false, error: `Błąd zapisu w bazie danych: ${insertError.message} (${insertError.details || 'brak szczegółów'})` };
       }
       importedCount = newWorkouts.length;
     }
