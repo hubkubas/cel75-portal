@@ -418,7 +418,8 @@ export async function getTodayWorkout(): Promise<any | null> {
     return null;
   }
 
-  // Bezpieczne, pojedyncze sortowanie po dacie (od najnowszego)
+  // ZMIANA KLUCZOWA: Pobieramy ABSOLUTNIE OSTATNI (najnowszy) trening zalogowanego użytkownika,
+  // używając w 100% bezpiecznego pojedynczego sortowania (order by data).
   const { data, error } = await supabase
     .from('treningi')
     .select('*')
@@ -736,11 +737,11 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
     return { success: false, error: err?.message || "Wystąpił nieoczekiwany błąd Gemini." };
   }
 
-  if (!aiAnaliza) {
+  // ZMIANA: Zablokowanie "Czarnej Dziury". Jeśli aiAnaliza jest pusta, przerywamy funkcję i NIE zapisujemy "wyslano: true"
+  if (!aiAnaliza || aiAnaliza.trim() === "") {
     return { success: false, error: "AI zwróciło pustą analizę treningu." };
   }
 
-  // Zapisujemy analizę i oznaczamy trening jako wysłany (wyslano = true) TYLKO gdy generowanie się powiodło!
   const { error: updateError } = await supabase
     .from('treningi')
     .update({
@@ -850,7 +851,6 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
 
       if (insertError) {
         console.error("Błąd zapisu nowych treningów ze Stravy:", insertError);
-        // DIAGNOSTYKA: Przekazujemy szczegółowy błąd PostgreSQL bezpośrednio do interfejsu użytkownika
         return { success: false, error: `Błąd zapisu w bazie danych: ${insertError.message} (${insertError.details || 'brak szczegółów'})` };
       }
       importedCount = newWorkouts.length;
