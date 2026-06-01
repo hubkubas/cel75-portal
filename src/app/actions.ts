@@ -193,7 +193,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
           
           # 🏃‍♂️ Zadanie biegowe na dziś (Dziś biegamy przez ${czas_na_trening} minut)
           
-          # 🥞 PROTOKÓŁ DIETETYCYJNY I ODŻYWIANIE (Przed, w trakcie i po biegu)
+          # 🥞 PROTOKÓŁ DIETETYCZNY I ODŻYWIANIE (Przed, w trakcie i po biegu)
           - Rozpisz dokładnie węglowodanowe śniadanie biegowe, nawodnienie i odżywianie w trakcie biegu oraz potreningowy shake białkowo-węglowodanowy na regenerację.
         `;
       } 
@@ -418,19 +418,20 @@ export async function getTodayWorkout(): Promise<any | null> {
     return null;
   }
 
-  const dzis = getWarsawDateString();
-
+  // ZMIANA KLUCZOWA: Zamiast szukać treningu strictly z dzisiejszą datą,
+  // pobieramy ABSOLUTNIE OSTATNI (najnowszy) trening zalogowanego użytkownika.
+  // Dzięki temu wczorajsze lub starsze treningi zaimportowane ze Stravy są widoczne na środku ekranu!
   const { data, error } = await supabase
     .from('treningi')
     .select('*')
     .eq('user_id', user.id)
-    .eq('data', dzis)
-    .eq('wyslano', true)
-    .not('ai_analiza', 'is', null)
+    .order('data', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) {
-    console.error("Błąd getTodayWorkout:", error);
+    console.error("Błąd getTodayWorkout (ostatni trening):", error);
     return null;
   }
 
@@ -658,10 +659,10 @@ export async function sendChatMessage(content: string, imageBase64?: string): Pr
 // V. ANALIZA AKTYWNOŚCI I METRYK (STRAVA & BACKWARD)
 // ==========================================
 
-export async function sendWorkoutToAI(trainingId: number): Promise<void> {
+export async function sendWorkoutToAI(trainingId: number): Promise<{ success: boolean; error?: string }> {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) throw new Error("Brak autoryzacji");
+  if (authError || !user) return { success: false, error: "Brak autoryzacji" };
 
   // Pobieramy parametry tego konkretnego treningu
   const { data: workout, error: workoutError } = await supabase
@@ -673,7 +674,7 @@ export async function sendWorkoutToAI(trainingId: number): Promise<void> {
 
   if (workoutError || !workout) {
     console.error("Nie znaleziono treningu:", workoutError);
-    return;
+    return { success: false, error: "Nie znaleziono treningu w bazie." };
   }
 
   // Pobieramy profil zawodnika do spersonalizowania analizy AI
@@ -725,23 +726,40 @@ export async function sendWorkoutToAI(trainingId: number): Promise<void> {
       if (response.ok) {
         const resData = await response.json() as any;
         aiAnaliza = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      } else {
+        const errText = await response.text();
+        console.error("Błąd API Gemini podczas analizy treningu:", errText);
+        return { success: false, error: "AI odmówiło wygenerowania raportu." };
       }
+    } else {
+      return { success: false, error: "Brak skonfigurowanego klucza API Gemini na serwerze." };
     }
-  } catch (err) {
+  } catch (err: any) {
     console.error("Błąd analizy treningowej Gemini:", err);
+    return { success: false, error: err?.message || "Wystąpił nieoczekiwany błąd Gemini." };
   }
 
-  // Zapisujemy analizę i oznaczamy trening jako wysłany (wyslano = true)
-  await supabase
+  if (!aiAnaliza) {
+    return { success: false, error: "AI zwróciło pustą analizę treningu." };
+  }
+
+  // Zapisujemy analizę i oznaczamy trening jako wysłany (wyslano = true) TYLKO gdy generowanie się powiodło!
+  const { error: updateError } = await supabase
     .from('treningi')
     .update({
-      ai_analiza: aiAnaliza || null,
+      ai_analiza: aiAnaliza,
       wyslano: true
     })
     .eq('id', trainingId)
     .eq('user_id', user.id);
 
+  if (updateError) {
+    console.error("Błąd zapisu analizy w bazie danych:", updateError);
+    return { success: false, error: "Nie udało się zapisać wygenerowanej analizy w bazie." };
+  }
+
   revalidatePath('/');
+  return { success: true };
 }
 
 export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; importedCount?: number; error?: string }> {
