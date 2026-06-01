@@ -60,10 +60,7 @@ export async function getTodayMorningReport(): Promise<any | null> {
     .eq('user_id', user.id)
     .maybeSingle();
 
-  if (error) {
-    console.error("Błąd getTodayMorningReport:", error);
-    return null;
-  }
+  if (error) console.error("Błąd getTodayMorningReport:", error);
   return data;
 }
 
@@ -71,9 +68,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-  if (authError || !user) {
-    throw new Error("Brak autoryzacji do wykonania tej akcji.");
-  }
+  if (authError || !user) throw new Error("Brak autoryzacji do wykonania tej akcji.");
 
   const dzis = getWarsawDateString();
 
@@ -93,11 +88,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
   const czas_na_trening = parseInt(formData.get('czas_na_trening') as string, 10) || 0;
   const notatki = (formData.get('notatki') as string) || '';
 
-  const { data: profile } = await supabase
-    .from('profile')
-    .select('*')
-    .eq('id', user.id)
-    .single();
+  const { data: profile } = await supabase.from('profile').select('*').eq('id', user.id).single();
 
   const imie = profile?.imie || 'zawodnik';
   const wiek = profile?.wiek || '';
@@ -146,21 +137,46 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
             2. ODŻYWIANIE W TRAKCIE JAZDY: Co pić (izotonik/elektrolity) oraz co jeść (żele, banany, batony) – podaj gramaturę węglowodanów na każdą godzinę wysiłku.
             3. REGENERACJA PO JAZDZIE: Co i jak szybko zjeść po powrocie (białko, węglowodany do odbudowy glikogenu w oknie anabolicznym) oraz jak przywrócić nawodnienie.
         `;
-      } else if (glownaDyscyplina === 'Bieg') {
+      } 
+      else if (glownaDyscyplina === 'Bieg') {
         dynamicSystemInstruction = `
-          Jesteś profesjonalnym Trenerem Biegowym. Twój podopieczny to ${imie}, wiek: ${wiek} lat.
-          KATEGORYCZNY WYMÓG STRUKTURY ODPOWIEDZI (Markdown):
-          # 🎙️ Odprawa i analiza biegowa
-          # 🏃‍♂️ Zadanie biegowe na dziś
-          # 🥞 PROTOKÓŁ DIETETYCZNY I ODŻYWIANIE
+          Jesteś profesjonalnym Trenerem Biegowym, fizjoterapeutą sportowym oraz ekspertem ds. biomechaniki biegu i żywienia maratońskiego.
+          Twój podopieczny to ${imie}, wiek: ${wiek} lat.
+          Poziom zaawansowania: ${poziom}. Cel wagowy: ${celWagowy}. Cele sportowe: ${celeSportowe}. Oczekiwania: ${oczekiwania}.
+
+          Kluczowe zalecenia biegowe:
+          - Unikaj przeciążeń stawów kolanowych i skokowych. Kładź nacisk na prawidłową technikę, kadencję biegową (ok. 170-180 kroków/min) i stabilizację.
+          - Strefa regeneracyjna tętna w biegu dla niego to: ${zone2.min}-${zone2.max} bpm.
+          - Używaj biegowych emotikonów (🏃‍♂️, 👟, ⏱️, 🍌).
+
+          KATEGORYCZNY WYMÓG STRUKTURY ODPOWIEDZI (Używaj dokładnie tych nagłówków Markdown):
+          
+          # 🎙️ Odprawa i analiza biegowa (Analiza HRV: ${hrv} ms, Body Battery i snu)
+          
+          # 🏃‍♂️ Zadanie biegowe na dziś (Dziś biegamy przez ${czas_na_trening} minut)
+          
+          # 🥞 PROTOKÓŁ DIETETYCZNY I ODŻYWIANIE (Przed, w trakcie i po biegu)
+          - Rozpisz dokładnie węglowodanowe śniadanie biegowe, nawodnienie i odżywianie w trakcie biegu oraz potreningowy shake białkowo-węglowodanowy na regenerację.
         `;
-      } else {
+      } 
+      else {
         dynamicSystemInstruction = `
-          Jesteś Mentorem Zdrowotnym. Twój podopieczny to ${imie}, wiek: ${wiek} lat.
-          KATEGORYCZNY WYMÓG STRUKTURY ODPOWIEDZI (Markdown):
-          # 🎙️ Samopoczucie i kondycja
-          # 🌳 Dzisiejszy spacer i sprawność
-          # 🍵 DIETA I NAWODNIENIE
+          Jesteś ciepłym, opiekuńczym Mentorem Zdrowotnym, ekspertem ds. medycyny długowieczności (longevity) oraz sprawności seniorów.
+          Twój podopieczny to ${imie}, wiek: ${wiek} lat. Cel: ${celeSportowe}. Podejście: Bardzo wspierające, cierpliwe, pełne empatii i ciepła.
+
+          Kluczowe zalecenia geriatryczne i ruchowe:
+          - Główną formą aktywności są marsze rekreacyjne, spacery oraz ćwiczenia równowagi.
+          - Tętno podczas marszu powinno być bezpieczne, łagodne dla serca (90-105 bpm).
+          - Używaj wspierających emotikonów (🌳, 🚶‍♂️, ☀️, 🍵).
+
+          KATEGORYCZNY WYMÓG STRUKTURY ODPOWIEDZI (Używaj dokładnie tych nagłówków Markdown):
+          
+          # 🎙️ Samopoczucie i kondycja (Analiza HRV: ${hrv} ms i snu)
+          
+          # 🌳 Dzisiejszy spacer i sprawność (Zaplanowane ${czas_na_trening} minut marszu)
+          
+          # 🍵 DIETA I NAWODNIENIE (Wskazówki żywieniowe dla seniora)
+          - Opisz, co lekkiego i odżywczego zjeść przed wyjściem, jak zadbać o nawodnienie podczas spaceru (np. woda z cytryną) oraz jaki lekki, wysokobiałkowy posiłek regeneracyjny zjeść po powrocie.
         `;
       }
 
@@ -280,23 +296,31 @@ export async function getUnsentWorkout(): Promise<any | null> {
 
 export async function getTodayWorkout(): Promise<any | null> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-  // POPRAWKA: Przywrócone filtry, żeby frontend nie mylił surowego treningu z analizowanym.
-  // Pobierze najnowszy trening, który MA JUŻ analizę.
-  const { data, error } = await supabase
+  if (authError || !user) return null;
+
+  // KROK 1: Pobieramy absolutnie najnowszy trening użytkownika ze wszystkich w bazie
+  const { data: latestWorkout, error } = await supabase
     .from('treningi')
     .select('*')
     .eq('user_id', user.id)
-    .eq('wyslano', true)
-    .not('ai_analiza', 'is', null)
     .order('data', { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (error) console.error("Błąd getTodayWorkout (ostatni trening):", error);
-  return data;
+  if (error || !latestWorkout) return null;
+
+  // KROK 2: INTELIGENTNY PRZEŁĄCZNIK
+  // Jeśli najnowszy trening NIE MA jeszcze analizy (wyslano: false),
+  // musimy zwrócić null. Dzięki temu frontend "ukryje" stary zanalizowany widok
+  // i zrobi miejsce dla komponentu getUnsentWorkout() (z przyciskiem do analizy).
+  if (latestWorkout.wyslano === false || latestWorkout.ai_analiza === null) {
+    return null;
+  }
+
+  // KROK 3: Jeśli najnowszy trening JEST zanalizowany, zwracamy go do wyświetlenia
+  return latestWorkout;
 }
 
 export async function getRecentWorkouts(): Promise<any[]> {
@@ -355,7 +379,29 @@ export async function sendChatMessage(content: string, imageBase64?: string): Pr
     const last10Messages = history.slice(-10);
 
     const imie = profile?.imie || 'zawodnik';
-    const dynamicChatInstruction = `Jesteś Osobistym Trenerem AI. Odpowiadaj merytorycznie. Dzisiejsza data: ${dzis}. Raport: ${todayReport?.ai_analiza || 'brak'}. Trening: ${todayWorkout?.ai_analiza || 'brak'}.`;
+    const wiek = profile?.wiek || '';
+    const glownaDyscyplina = profile?.glowna_dyscyplina || 'Rower';
+    const celWagowy = profile?.cel_wagowy || 'Utrzymanie wagi';
+    const celeSportowe = profile?.cele_sportowe || 'Zdrowie';
+    const zone2 = profile?.strefy_tetna?.zone2 || { min: 105, max: 115 };
+
+    const dynamicChatInstruction = `
+      Jesteś tym samym Osobistym Trenerem AI. 
+      === PROFIL ZAWODNIKA ===
+      - Wiek: ${wiek} lat
+      - Główna dyscyplina: ${glownaDyscyplina}
+      - Cel sportowy: ${celeSportowe}
+      - Cel wagowy: ${celWagowy}
+      - Strefa 2 (Zone 2) tętna: ${zone2.min}-${zone2.max} bpm
+
+      === AKTUALNY STAN BIOLOGICZNY NA DZIŚ (${dzis}) ===
+      ${todayReport ? `Waga rano: ${todayReport.waga} kg, HRV: ${todayReport.hrv} ms, Sen: ${todayReport.jakosc_snu}/100. Analiza rano: "${todayReport.ai_analiza}"` : '- Brak raportu porannego.'}
+
+      === AKTUALNY TRENING NA DZIŚ (${dzis}) ===
+      ${todayWorkout ? `Dystans: ${todayWorkout.dystans} km, Tętno: ${todayWorkout.tetno_srednie} bpm. Analiza treningu: "${todayWorkout.ai_analiza}"` : '- Brak treningu.'}
+
+      Odpowiadaj z pasją, merytorycznie, motywująco. OPRZYJ SIĘ na powyższych danych z dzisiaj!
+    `;
 
     const contents = last10Messages.map((msg, index) => {
       const isLast = index === last10Messages.length - 1;
@@ -422,7 +468,7 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
       const prompt = `Przeanalizuj dzisiejszy trening (${workout.rodzaj}) zawodnika o imieniu ${imie}:
       Dystans: ${workout.dystans} km, Czas: ${workout.czas_minuty} min, Tętno śr: ${workout.tetno_srednie} bpm, Kadencja: ${workout.kadencja_srednia} RPM. Oceń strefę 2 (${zone2.min}-${zone2.max} bpm).`;
 
-      const dynamicSystemInstruction = `Jesteś Osobistym Trenerem. Podopieczny: ${imie}, wiek: ${wiek}, sport: ${glownaDyscyplina}. Filozofia: ${filozofia}.`;
+      const dynamicSystemInstruction = `Jesteś Osobistym Trenerem. Podopieczny: ${imie}, wiek: ${wiek}, sport: ${glownaDyscyplina}. Filozofia: ${filozofia}. Odpowiadaj profesjonalnie, motywująco.`;
 
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
         method: "POST",
@@ -437,8 +483,6 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
         const resData = await response.json() as any;
         aiAnaliza = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
       } else {
-        const errText = await response.text();
-        console.error("Błąd API Gemini:", errText);
         return { success: false, error: "AI odmówiło wygenerowania raportu." };
       }
     } else {
@@ -452,9 +496,7 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
     return { success: false, error: "AI zwróciło pustą analizę treningu." };
   }
 
-  // Zapisujemy TYLKO gdy generowanie się powiodło
   await supabase.from('treningi').update({ ai_analiza: aiAnaliza, wyslano: true }).eq('id', trainingId).eq('user_id', user.id);
-
   revalidatePath('/');
   return { success: true };
 }
