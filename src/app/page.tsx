@@ -13,6 +13,7 @@ import TrainerChat from '@/components/TrainerChat';
 import { SubmitButton } from './submit-button';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/utils/supabase/server';
+import OnboardingForm from '@/components/OnboardingForm';
 
 export const dynamic = 'force-dynamic'; 
 
@@ -24,12 +25,27 @@ export default async function Page() {
     redirect('/login');
   }
 
-  // Pobieramy dane profilu do pełnej personalizacji interfejsu (UI)
+  // 1. Pobieramy rozszerzone dane profilu (dodana kolumna onboarded, cel_wagowy, wiek)
   const { data: profile } = await supabase
     .from('profile')
-    .select('imie, glowna_dyscyplina')
+    .select('imie, glowna_dyscyplina, onboarded, cel_wagowy, wiek')
     .eq('id', user.id)
     .maybeSingle();
+
+  // 2. Warunek blokujący: Sprawdzamy, czy użytkownik musi przejść onboarding
+  const needsOnboarding = !profile || !profile.onboarded;
+
+  if (needsOnboarding) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 sm:p-6 md:p-8">
+        <OnboardingForm />
+      </main>
+    );
+  }
+
+  // =========================================================================
+  // LOGIKA DLA UŻYTKOWNIKA PO ONBOARDINGU
+  // =========================================================================
 
   const nazwaZalogowanego = profile?.imie || 'Zawodnik';
   const glownaDyscyplina = profile?.glowna_dyscyplina || 'Rower';
@@ -48,7 +64,7 @@ export default async function Page() {
     naglowekFormularza = '🚴‍♂️ Poranny raport kolarski';
   }
 
-  // Pobieranie danych
+  // Pobieranie danych (wykonywane tylko gdy użytkownik pomyślnie ukończył onboarding)
   const todayReport = await getTodayMorningReport();
   const unsentWorkout = await getUnsentWorkout();
   const todayWorkout = await getTodayWorkout(); 

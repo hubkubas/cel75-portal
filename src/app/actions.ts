@@ -17,6 +17,11 @@ export interface Message {
   obrazek_base64?: string | null;
 }
 
+export type OnboardingState = {
+  success?: boolean;
+  error?: string;
+};
+
 // ==========================================
 // FUNKCJE POMOCNICZE (BEZPIECZNE FORMATOWANIE DATY)
 // ==========================================
@@ -39,6 +44,68 @@ export async function logout(): Promise<void> {
   await supabase.auth.signOut();
   revalidatePath('/', 'layout');
   redirect('/login');
+}
+
+// NOWA AKCJA: INTERAKTYWNY ONBOARDING
+export async function saveOnboardingAction(
+  prevState: OnboardingState | null,
+  formData: FormData
+): Promise<OnboardingState> {
+  const ageStr = formData.get('age') as string;
+  const sportProfile = formData.get('sport_profile') as string; // 'Rower' | 'Bieg' | 'Senior'
+  const weightGoal = formData.get('weight_goal') as string; // 'Schudnąć' | 'Utrzymać' | 'Przytyć'
+
+  const age = parseInt(ageStr, 10);
+
+  // Walidacja wieku
+  if (!age || isNaN(age) || age < 13 || age > 120) {
+    return { error: 'Podaj poprawny wiek (od 13 do 120 lat).' };
+  }
+
+  // Walidacja profilu sportowego zgodnie z Twoją strukturą
+  const validProfiles = ['Rower', 'Bieg', 'Senior'];
+  if (!validProfiles.includes(sportProfile)) {
+    return { error: 'Wybierz jeden z dostępnych profili sportowych.' };
+  }
+
+  // Walidacja celu wagowego zgodnie z Twoją strukturą
+  const validGoals = ['Schudnąć', 'Utrzymać', 'Przytyć'];
+  if (!validGoals.includes(weightGoal)) {
+    return { error: 'Wybierz poprawny cel wagowy.' };
+  }
+
+  try {
+    const supabase = await createClient();
+
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      return { error: 'Sesja wygasła. Zaloguj się ponownie.' };
+    }
+
+    // Zapisujemy bezpośrednio do Twojej istniejącej tabeli 'profile'
+    const { error } = await supabase
+      .from('profile')
+      .upsert({
+        id: user.id,
+        wiek: age,
+        glowna_dyscyplina: sportProfile,
+        cel_wagowy: weightGoal,
+        onboarded: true,
+        updated_at: new Date().toISOString(),
+      });
+
+    if (error) {
+      console.error('Błąd zapisu profilu:', error.message);
+      return { error: 'Nie udało się zapisać profilu. Spróbuj ponownie.' };
+    }
+
+    revalidatePath('/');
+    return { success: true };
+
+  } catch (err) {
+    console.error('Nieoczekiwany błąd w saveOnboardingAction:', err);
+    return { error: 'Wystąpił nieoczekiwany błąd serwera.' };
+  }
 }
 
 // ==========================================
@@ -89,10 +156,10 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
   const czas_na_trening = parseInt(formData.get('czas_na_trening') as string, 10) || 0;
   const notatki = (formData.get('notatki') as string) || '';
   
-// NOWE POLA Z FORMULARZA
-const is_rest_day = formData.get('is_rest_day') === 'true';
-const workout_type = (formData.get('workout_type') as string) || 'Rower';
-const workout_time = (formData.get('workout_time') as string) || 'popoludnie'; // <-- NOWE
+  // NOWE POLA Z FORMULARZA
+  const is_rest_day = formData.get('is_rest_day') === 'true';
+  const workout_type = (formData.get('workout_type') as string) || 'Rower';
+  const workout_time = (formData.get('workout_time') as string) || 'popoludnie';
 
   const { data: profile } = await supabase.from('profile').select('*').eq('id', user.id).single();
 
@@ -189,23 +256,23 @@ const workout_time = (formData.get('workout_time') as string) || 'popoludnie'; /
     console.error("Błąd generowania analizy przez Gemini:", err);
   }
 
-// Zapis do Supabase uwzględniający nowe pola
-const { error: insertError } = await supabase
-.from('poranki')
-.insert([{
-  user_id: user.id,
-  data: dzis,
-  waga, 
-  hrv, 
-  body_battery, 
-  jakosc_snu, 
-  czas_na_trening, 
-  notatki: notatki || null, 
-  ai_analiza: aiAnaliza || null,
-  is_rest_day,
-  workout_type,
-  workout_time: is_rest_day ? 'none' : workout_time // <-- ZAPISUJEMY PORĘ (lub 'none' jeśli rest day)
-}]);
+  // Zapis do Supabase uwzględniający nowe pola
+  const { error: insertError } = await supabase
+    .from('poranki')
+    .insert([{
+      user_id: user.id,
+      data: dzis,
+      waga, 
+      hrv, 
+      body_battery, 
+      jakosc_snu, 
+      czas_na_trening, 
+      notatki: notatki || null, 
+      ai_analiza: aiAnaliza || null,
+      is_rest_day,
+      workout_type,
+      workout_time: is_rest_day ? 'none' : workout_time
+    }]);
 
   if (insertError) console.error("Błąd zapisu poranka w Supabase:", insertError);
   revalidatePath('/');
@@ -298,7 +365,6 @@ export async function getTodayWorkout(): Promise<any | null> {
 
   if (authError || !user) return null;
 
-  // KROK 1: Pobieramy absolutnie najnowszy trening użytkownika ze wszystkich w bazie
   const { data: latestWorkout, error } = await supabase
     .from('treningi')
     .select('*')
@@ -309,15 +375,10 @@ export async function getTodayWorkout(): Promise<any | null> {
 
   if (error || !latestWorkout) return null;
 
-  // KROK 2: INTELIGENTNY PRZEŁĄCZNIK
-  // Jeśli najnowszy trening NIE MA jeszcze analizy (wyslano: false),
-  // musimy zwrócić null. Dzięki temu frontend "ukryje" stary zanalizowany widok
-  // i zrobi miejsce dla komponentu getUnsentWorkout() (z przyciskiem do analizy).
   if (latestWorkout.wyslano === false || latestWorkout.ai_analiza === null) {
     return null;
   }
 
-  // KROK 3: Jeśli najnowszy trening JEST zanalizowany, zwracamy go do wyświetlenia
   return latestWorkout;
 }
 
@@ -469,27 +530,20 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
   // POBIERANIE POGODY Z OPEN-METEO (Jeśli są współrzędne)
   if (workout.latitude && workout.longitude) {
     try {
-      const dataTreningu = workout.data; // Format YYYY-MM-DD
-      
-      // Wywołanie API Open-Meteo dla danych historycznych
+      const dataTreningu = workout.data;
       const weatherUrl = `https://archive-api.open-meteo.com/v1/archive?latitude=${workout.latitude}&longitude=${workout.longitude}&start_date=${dataTreningu}&end_date=${dataTreningu}&hourly=temperature_2m,wind_speed_10m,wind_direction_10m,rain&wind_speed_unit=ms`;
       
       const weatherRes = await fetch(weatherUrl);
       if (weatherRes.ok) {
         const weatherJson = await weatherRes.json() as any;
-        
-        // Strava nie zawsze ma zapisaną dokładną godzinę w Summary, ale możemy spróbować
-        // dopasować średnią z dnia lub wyciągnąć konkretną godzinę (np. środek dnia lub popołudnie).
-        // Dla uproszczenia wyciągamy wartości średnie lub z godziny 14:00 (indeks 14 w tablicy 24h)
         const hourIndex = 14; 
         
         temp = weatherJson.hourly?.temperature_2m?.[hourIndex] || null;
-        windSpeed = weatherJson.hourly?.wind_speed_10m?.[hourIndex] || null; // W metrach na sekundę (m/s)
+        windSpeed = weatherJson.hourly?.wind_speed_10m?.[hourIndex] || null;
         windDir = weatherJson.hourly?.wind_direction_10m?.[hourIndex] || null;
         rain = weatherJson.hourly?.rain?.[hourIndex] || null;
 
         if (temp !== null && windSpeed !== null) {
-          // Przeliczamy m/s na km/h dla łatwiejszego czytania przez AI i człowieka
           const windKmH = Math.round(windSpeed * 3.6);
           weatherStringForAI = `Temperatura: ${temp}°C, Wiatr: ${windKmH} km/h (kierunek: ${windDir}°), Opady: ${rain || 0} mm.`;
         }
@@ -503,7 +557,6 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
-      // Wstrzykujemy pogodę do promptu dla Gemini!
       const prompt = `Przeanalizuj dzisiejszy trening (${workout.rodzaj}) zawodnika o imieniu ${imie}:
       Dystans: ${workout.dystans} km, Czas: ${workout.czas_minuty} min, Tętno śr: ${workout.tetno_srednie} bpm, Kadencja: ${workout.kadencja_srednia} RPM.
       WARUNKI ATMOSFERYCZNE: ${weatherStringForAI}
@@ -541,7 +594,6 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
     return { success: false, error: "AI zwróciło pustą analizę treningu." };
   }
 
-  // Zapisujemy analizę oraz dane pogodowe bezpośrednio do bazy danych, aby mieć do nich wgląd
   await supabase.from('treningi').update({ 
     ai_analiza: aiAnaliza, 
     wyslano: true,
@@ -594,7 +646,6 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
       if (act.type === 'Swim') rodzaj = 'Pływanie';
       if (act.type === 'WeightTraining' || act.type === 'Workout') rodzaj = 'Siłownia';
 
-      // Wyciągamy współrzędne startowe ze Stravy (jeśli istnieją)
       const latitude = act.start_latlng && act.start_latlng[0] ? act.start_latlng[0] : null;
       const longitude = act.start_latlng && act.start_latlng[1] ? act.start_latlng[1] : null;
 
@@ -609,8 +660,8 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
         kadencja_srednia: act.average_cadence ? Math.round(act.average_cadence) : null,
         strava_id: act.id,
         wyslano: false,
-        latitude, // <-- NOWE
-        longitude // <-- NOWE
+        latitude,
+        longitude
       };
     });
 
