@@ -459,14 +459,61 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
   const zone2 = profile?.strefy_tetna?.zone2 || { min: 105, max: 115 };
   const filozofia = profile?.filozofia_treningowa || 'Mitochondrialna baza (Zone 2)';
 
+  // ZMIENNE POGODOWE (DOMYŚLNE)
+  let temp = null;
+  let windSpeed = null;
+  let windDir = null;
+  let rain = null;
+  let weatherStringForAI = "Brak danych pogodowych.";
+
+  // POBIERANIE POGODY Z OPEN-METEO (Jeśli są współrzędne)
+  if (workout.latitude && workout.longitude) {
+    try {
+      const dataTreningu = workout.data; // Format YYYY-MM-DD
+      
+      // Wywołanie API Open-Meteo dla danych historycznych
+      const weatherUrl = `https://archive-api.open-meteo.com/v1/archive?latitude=${workout.latitude}&longitude=${workout.longitude}&start_date=${dataTreningu}&end_date=${dataTreningu}&hourly=temperature_2m,wind_speed_10m,wind_direction_10m,rain&wind_speed_unit=ms`;
+      
+      const weatherRes = await fetch(weatherUrl);
+      if (weatherRes.ok) {
+        const weatherJson = await weatherRes.json() as any;
+        
+        // Strava nie zawsze ma zapisaną dokładną godzinę w Summary, ale możemy spróbować
+        // dopasować średnią z dnia lub wyciągnąć konkretną godzinę (np. środek dnia lub popołudnie).
+        // Dla uproszczenia wyciągamy wartości średnie lub z godziny 14:00 (indeks 14 w tablicy 24h)
+        const hourIndex = 14; 
+        
+        temp = weatherJson.hourly?.temperature_2m?.[hourIndex] || null;
+        windSpeed = weatherJson.hourly?.wind_speed_10m?.[hourIndex] || null; // W metrach na sekundę (m/s)
+        windDir = weatherJson.hourly?.wind_direction_10m?.[hourIndex] || null;
+        rain = weatherJson.hourly?.rain?.[hourIndex] || null;
+
+        if (temp !== null && windSpeed !== null) {
+          // Przeliczamy m/s na km/h dla łatwiejszego czytania przez AI i człowieka
+          const windKmH = Math.round(windSpeed * 3.6);
+          weatherStringForAI = `Temperatura: ${temp}°C, Wiatr: ${windKmH} km/h (kierunek: ${windDir}°), Opady: ${rain || 0} mm.`;
+        }
+      }
+    } catch (weatherErr) {
+      console.error("Błąd pobierania pogody:", weatherErr);
+    }
+  }
+
   let aiAnaliza = "";
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
+      // Wstrzykujemy pogodę do promptu dla Gemini!
       const prompt = `Przeanalizuj dzisiejszy trening (${workout.rodzaj}) zawodnika o imieniu ${imie}:
-      Dystans: ${workout.dystans} km, Czas: ${workout.czas_minuty} min, Tętno śr: ${workout.tetno_srednie} bpm, Kadencja: ${workout.kadencja_srednia} RPM. Oceń strefę 2 (${zone2.min}-${zone2.max} bpm).`;
+      Dystans: ${workout.dystans} km, Czas: ${workout.czas_minuty} min, Tętno śr: ${workout.tetno_srednie} bpm, Kadencja: ${workout.kadencja_srednia} RPM.
+      WARUNKI ATMOSFERYCZNE: ${weatherStringForAI}
+      Oceń strefę 2 (${zone2.min}-${zone2.max} bpm) w odniesieniu do tych warunków.`;
 
-      const dynamicSystemInstruction = `Jesteś Osobistym Trenerem. Podopieczny: ${imie}, wiek: ${wiek}, sport: ${glownaDyscyplina}. Filozofia: ${filozofia}. Odpowiadaj profesjonalnie, motywująco.`;
+      const dynamicSystemInstruction = `
+        Jesteś elitarnym Trenerem Osobistym i Fizjologiem Sportu. Podopieczny: ${imie}, wiek: ${wiek}, sport: ${glownaDyscyplina}. Filozofia: ${filozofia}.
+        Odpowiadaj profesjonalnie, motywująco, stosując kolarskie/biegowe pojęcia.
+        KATEGORYCZNY WYMÓG: Jeśli w warunkach atmosferycznych podano silny wiatr (np. powyżej 15 km/h) lub ekstremalną temperaturę (poniżej 5°C lub powyżej 28°C), uwzględnij ten wpływ na tętno i wysiłek zawodnika! Wyjaśnij mu, że walka z wiatrem czołowym podnosi tętno i jest to naturalna reakcja fizjologiczna.
+      `;
 
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
         method: "POST",
@@ -494,7 +541,16 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
     return { success: false, error: "AI zwróciło pustą analizę treningu." };
   }
 
-  await supabase.from('treningi').update({ ai_analiza: aiAnaliza, wyslano: true }).eq('id', trainingId).eq('user_id', user.id);
+  // Zapisujemy analizę oraz dane pogodowe bezpośrednio do bazy danych, aby mieć do nich wgląd
+  await supabase.from('treningi').update({ 
+    ai_analiza: aiAnaliza, 
+    wyslano: true,
+    weather_temp: temp,
+    weather_wind_speed: windSpeed ? Math.round(windSpeed * 3.6) : null,
+    weather_wind_direction: windDir,
+    weather_rain: rain
+  }).eq('id', trainingId).eq('user_id', user.id);
+  
   revalidatePath('/');
   return { success: true };
 }
@@ -538,6 +594,10 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
       if (act.type === 'Swim') rodzaj = 'Pływanie';
       if (act.type === 'WeightTraining' || act.type === 'Workout') rodzaj = 'Siłownia';
 
+      // Wyciągamy współrzędne startowe ze Stravy (jeśli istnieją)
+      const latitude = act.start_latlng && act.start_latlng[0] ? act.start_latlng[0] : null;
+      const longitude = act.start_latlng && act.start_latlng[1] ? act.start_latlng[1] : null;
+
       return {
         user_id: user.id,
         data: act.start_date_local.split('T')[0],
@@ -548,7 +608,9 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
         tetno_max: act.has_heartrate ? Math.round(act.max_heartrate) : null,
         kadencja_srednia: act.average_cadence ? Math.round(act.average_cadence) : null,
         strava_id: act.id,
-        wyslano: false
+        wyslano: false,
+        latitude, // <-- NOWE
+        longitude // <-- NOWE
       };
     });
 
