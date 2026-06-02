@@ -89,9 +89,10 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
   const czas_na_trening = parseInt(formData.get('czas_na_trening') as string, 10) || 0;
   const notatki = (formData.get('notatki') as string) || '';
   
-  // NOWE POLA Z FORMULARZA
-  const is_rest_day = formData.get('is_rest_day') === 'true';
-  const workout_type = (formData.get('workout_type') as string) || 'Rower';
+// NOWE POLA Z FORMULARZA
+const is_rest_day = formData.get('is_rest_day') === 'true';
+const workout_type = (formData.get('workout_type') as string) || 'Rower';
+const workout_time = (formData.get('workout_time') as string) || 'popoludnie'; // <-- NOWE
 
   const { data: profile } = await supabase.from('profile').select('*').eq('id', user.id).single();
 
@@ -115,7 +116,8 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
       Body Battery: ${body_battery}
       Jakość snu: ${jakosc_snu}/100
       Dzień bez treningu (Rest Day): ${is_rest_day ? 'TAK' : 'NIE'}
-      Planowany rodzaj treningu: ${workout_type}
+      Planowany rodzaj treningu: ${is_rest_day ? 'brak' : workout_type}
+      Planowana pora treningu: ${is_rest_day ? 'brak' : workout_time}
       Czas na aktywność dzisiaj: ${czas_na_trening} minut
       Notatki użytkownika: ${notatki || 'brak'}`;
 
@@ -142,10 +144,23 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
         - Jeśli "Planowany rodzaj treningu" = Siłownia: Wygeneruj plan treningu siłowego. Użytkownik ma w domu TYLKO: ławeczkę, wolne ciężary i gumy oporowe. Dostosuj plan do tego sprzętu!
         - Jeśli "Planowany rodzaj treningu" = Rower/Bieg: Wygeneruj normalny plan wg czasu i notatek.
 
-        2. DIETA (CAŁY DZIEŃ):
-        - ZAWSZE generuj propozycje menu na CAŁY DZIEŃ (Śniadanie, Obiad, Kolacja, ewentualne przekąski). Nie ograniczaj się tylko do posiłków okołotreningowych!
-        - Jeśli "Dzień bez treningu" = TAK: Zastosuj dietę regeneracyjną. Zredukuj węglowodany, skup się na wysokiej jakości białku i zdrowych tłuszczach.
-        - Jeśli to dzień treningowy: Uwzględnij węglowodany przed i po treningu, a resztę dnia zbilansuj.
+        2. DIETA (CAŁY DZIEŃ i NUTRIENT TIMING):
+        - ZAWSZE generuj pełne menu na CAŁY DZIEŃ z podziałem na posiłki.
+        - Dostosuj pory posiłków i rozkład makroskładników bezpośrednio do pory treningu ("Planowana pora treningu"):
+          * Jeśli trening jest RANO (poranek):
+            -> Śniadanie: Wybitnie lekkostrawne węglowodany (np. owsianka na wodzie, banan, tost z dżemem) - paliwo bezpośrednio przed wysiłkiem.
+            -> Obiad: Obfity posiłek potreningowy (wysokie węglowodany i białko, niska zawartość tłuszczu dla szybkiej odbudowy glikogenu).
+            -> Kolacja: Lekka, zbilansowana (białko i zdrowe tłuszcze, mało węglowodanów).
+          * Jeśli trening jest POPOŁUDNIU (popołudnie):
+            -> Śniadanie: Zbilansowane, bogate w białko i tłuszcze (np. jajecznica z awokado, omlet), średnia ilość węglowodanów.
+            -> Obiad: Lekki posiłek przedtreningowy o średnim/niskim indeksie glikemicznym (zjedzony 2-3h przed startem).
+            -> Kolacja: Potężna dawka potreningowej regeneracji (węglowodany + białko do odbudowy).
+          * Jeśli trening jest WIECZOREM (wieczór):
+            -> Śniadanie i Obiad: Standardowe, pełnowartościowe posiłki zbilansowane.
+            -> Podwieczorek / Przekąska przedtreningowa: Szybkie węglowodany na 1h przed wieczornym wyjściem.
+            -> Kolacja: Posiłek potreningowy (białko + lekkostrawne węglowodany, np. kasza manna z odżywką białkową, by nie obciążać żołądka przed snem).
+          * Jeśli to Dzień bez treningu:
+            -> Rozpisz zbilansowane, lekko niskowęglowodanowe posiłki regeneracyjne rozłożone równomiernie na cały dzień, bez nagłych skoków insuliny.
 
         === WYMAGANA STRUKTURA ODPOWIEDZI (Używaj Markdown) ===
         # 🎙️ Odprawa i analiza poranna (HRV, Sen)
@@ -174,22 +189,23 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
     console.error("Błąd generowania analizy przez Gemini:", err);
   }
 
-  // Zapis do Supabase uwzględniający nowe pola
-  const { error: insertError } = await supabase
-    .from('poranki')
-    .insert([{
-      user_id: user.id,
-      data: dzis,
-      waga, 
-      hrv, 
-      body_battery, 
-      jakosc_snu, 
-      czas_na_trening, 
-      notatki: notatki || null, 
-      ai_analiza: aiAnaliza || null,
-      is_rest_day, // <-- NOWE
-      workout_type // <-- NOWE
-    }]);
+// Zapis do Supabase uwzględniający nowe pola
+const { error: insertError } = await supabase
+.from('poranki')
+.insert([{
+  user_id: user.id,
+  data: dzis,
+  waga, 
+  hrv, 
+  body_battery, 
+  jakosc_snu, 
+  czas_na_trening, 
+  notatki: notatki || null, 
+  ai_analiza: aiAnaliza || null,
+  is_rest_day,
+  workout_type,
+  workout_time: is_rest_day ? 'none' : workout_time // <-- ZAPISUJEMY PORĘ (lub 'none' jeśli rest day)
+}]);
 
   if (insertError) console.error("Błąd zapisu poranka w Supabase:", insertError);
   revalidatePath('/');

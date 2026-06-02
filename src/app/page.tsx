@@ -148,6 +148,7 @@ export default async function Page() {
                 <span className="text-xs text-slate-500">{todayReport.data}</span>
               </div>
 
+              {/* TUTAJ: Podsumowanie poranka po wysłaniu */}
               <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 mb-6 bg-slate-950 p-4 rounded-xl border border-slate-850 text-xs">
                 <div>
                   <span className="text-slate-500 block">Waga:</span>
@@ -162,16 +163,21 @@ export default async function Page() {
                   <span className="font-bold text-slate-200 block text-sm mt-0.5">{todayReport.jakosc_snu}/100</span>
                 </div>
                 
-                {/* Dynamiczne pola w zależności od tego, czy to Rest Day */}
                 {todayReport.is_rest_day ? (
                   <div className="col-span-3 bg-emerald-900/20 border border-emerald-900/50 rounded-lg p-2 flex items-center justify-center">
                     <span className="font-bold text-emerald-400 text-sm">🧘‍♂️ Dzień Regeneracji (Rest Day)</span>
                   </div>
                 ) : (
                   <>
-                    <div className="col-span-2">
-                      <span className="text-slate-500 block">Rodzaj treningu:</span>
+                    <div>
+                      <span className="text-slate-500 block">Trening:</span>
                       <span className="font-bold text-orange-400 block text-sm mt-0.5">{todayReport.workout_type}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Pora:</span>
+                      <span className="font-bold text-slate-200 block text-sm mt-0.5">
+                        {todayReport.workout_time === 'poranek' ? '🌅 Rano' : todayReport.workout_time === 'popoludnie' ? '☀️ Popołudnie' : '🌙 Wieczór'}
+                      </span>
                     </div>
                     <div>
                       <span className="text-slate-500 block">Czas:</span>
@@ -266,9 +272,29 @@ export default async function Page() {
                       </label>
                     </div>
 
+                    {/* WYBÓR PORY TRENINGU */}
+                    <div className="mt-4 border-t border-slate-800 pt-4">
+                      <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">
+                        Planowana pora treningu
+                      </label>
+                      <div className="flex flex-col sm:flex-row gap-4 mb-4">
+                        <label className="flex items-center gap-2 cursor-pointer bg-slate-900 px-4 py-2 rounded-lg border border-slate-800 hover:border-orange-500 transition-colors">
+                          <input type="radio" name="workout_time" value="poranek" defaultChecked className="accent-orange-500 w-4 h-4" />
+                          <span className="text-sm font-medium text-slate-200">🌅 Rano (przed 12:00)</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer bg-slate-900 px-4 py-2 rounded-lg border border-slate-800 hover:border-orange-500 transition-colors">
+                          <input type="radio" name="workout_time" value="popoludnie" className="accent-orange-500 w-4 h-4" />
+                          <span className="text-sm font-medium text-slate-200">☀️ Popołudnie (12:00 - 17:00)</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer bg-slate-900 px-4 py-2 rounded-lg border border-slate-800 hover:border-orange-500 transition-colors">
+                          <input type="radio" name="workout_time" value="wieczor" className="accent-orange-500 w-4 h-4" />
+                          <span className="text-sm font-medium text-slate-200">🌙 Wieczór (po 17:00)</span>
+                        </label>
+                      </div>
+                    </div>
+
                     <div>
                       <label className="block text-xs font-semibold text-slate-400 mb-1.5">Czas na trening (min)</label>
-                      {/* Usunięto 'required', aby formularz przeszedł walidację HTML5, gdy pole jest ukryte (Rest Day) */}
                       <input type="number" name="czas_na_trening" defaultValue="0" placeholder="np. 60" className="w-full sm:w-1/3 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-orange-500" />
                     </div>
                   </div>
