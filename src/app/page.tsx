@@ -243,70 +243,96 @@ export default async function Page() {
                 {podtytulFormularza}
               </p>
 
-              <form action={saveMorningReport} className="space-y-5">
-                {/* 6-kolumnowy grid metryk biologicznych, czasowych i dystansowych */}
-                <div className="grid grid-cols-2 sm:grid-cols-6 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Waga (kg)</label>
-                    <input 
-                      type="number" 
-                      name="waga" 
-                      step="0.1" 
-                      required 
-                      placeholder="np. 74.5" 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-emerald-500" 
-                    />
+              <form action={saveMorningReport} className="space-y-6">
+                
+                {/* SEKCJA 1: STAN BIOLOGICZNY */}
+                <div>
+                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                    📊 Stan Biologiczny (Z rana)
+                  </h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Waga (kg)</label>
+                      <input 
+                        type="number" 
+                        name="waga" 
+                        step="0.1" 
+                        required 
+                        placeholder="np. 74.5" 
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-emerald-500" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">HRV (ms)</label>
+                      <input 
+                        type="number" 
+                        name="hrv" 
+                        required 
+                        placeholder="np. 55" 
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-emerald-500" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Body Battery</label>
+                      <input 
+                        type="number" 
+                        name="body_battery" 
+                        required 
+                        placeholder="0-100" 
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-emerald-500" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Jakość snu</label>
+                      <input 
+                        type="number" 
+                        name="jakosc_snu" 
+                        required 
+                        placeholder="0-100" 
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-emerald-500" 
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">HRV (ms)</label>
-                    <input 
-                      type="number" 
-                      name="hrv" 
-                      required 
-                      placeholder="np. 55" 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-emerald-500" 
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Body Battery</label>
-                    <input 
-                      type="number" 
-                      name="body_battery" 
-                      required 
-                      placeholder="0-100" 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-emerald-500" 
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Jakość snu</label>
-                    <input 
-                      type="number" 
-                      name="jakosc_snu" 
-                      required 
-                      placeholder="0-100" 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-emerald-500" 
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Czas wolny (min)</label>
-                    <input 
-                      type="number" 
-                      name="czas_na_trening" 
-                      defaultValue="0" 
-                      placeholder="np. 90" 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-orange-500" 
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Lub dystans (km)</label>
-                    <input 
-                      type="number" 
-                      name="docelowy_dystans" 
-                      step="0.1"
-                      defaultValue="0" 
-                      placeholder="np. 70" 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-orange-500" 
-                    />
+                </div>
+
+                {/* SEKCJA 2: ZAŁOŻENIA TRENINGOWE */}
+                <div>
+                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                    🎯 Twoje założenia na dzisiaj
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Czas wolny (min)</label>
+                      <input 
+                        type="number" 
+                        name="czas_na_trening" 
+                        defaultValue="0" 
+                        placeholder="np. 90" 
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-orange-500" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Lub dystans (km)</label>
+                      <input 
+                        type="number" 
+                        name="docelowy_dystans" 
+                        step="0.1"
+                        defaultValue="0" 
+                        placeholder="np. 70" 
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-orange-500" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Sugerowana pora</label>
+                      <select
+                        name="preferowana_pora"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-slate-200 text-sm focus:outline-none focus:border-orange-500 cursor-pointer"
+                      >
+                        <option value="poranek">🌅 Rano (przed 12:00)</option>
+                        <option value="popoludnie" selected>☀️ Popołudnie (12:00 - 17:00)</option>
+                        <option value="wieczor">🌙 Wieczór (po 17:00)</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
 

@@ -161,10 +161,11 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
   const body_battery = parseInt(formData.get('body_battery') as string, 10) || 0;
   const jakosc_snu = parseInt(formData.get('jakosc_snu') as string, 10) || 0;
   const czas_na_trening = parseInt(formData.get('czas_na_trening') as string, 10) || 0;
-  const docelowy_dystans = parseFloat(formData.get('docelowy_dystans') as string) || 0; // Opcjonalny dystans
+  const docelowy_dystans = parseFloat(formData.get('docelowy_dystans') as string) || 0;
+  const preferowana_pora = (formData.get('preferowana_pora') as string) || 'popoludnie'; // Opcjonalna preferowana pora
   let notatkiRaw = (formData.get('notatki') as string) || '';
 
-  // Zapisujemy cel dystansowy bezpośrednio w notatkach, aby zachować go w bazie bez migracji kolumn
+  // Archiwizacja celu dystansowego bezpośrednio w notatkach
   const notatki = docelowy_dystans > 0 
     ? `[Cel: ${docelowy_dystans} km] ${notatkiRaw}`.trim() 
     : notatkiRaw;
@@ -202,7 +203,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
-      // Wzbogacenie promptu o parametry ograniczające (czas lub dystans)
+      // Rozbudowanie promptu o preferowaną porę dnia
       const prompt = `Przeanalizuj dzisiejszy poranek zawodnika o imieniu ${imie} i zaproponuj sugerowane zalecenia:
       Waga: ${waga} kg
       HRV: ${hrv} ms
@@ -210,6 +211,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
       Jakość snu: ${jakosc_snu}/100
       Ograniczenie czasowe na dziś: ${czas_na_trening > 0 ? czas_na_trening + ' minut' : 'brak konkretnego limitu czasowego'}
       Docelowy dystans zadeklarowany przez zawodnika: ${docelowy_dystans > 0 ? docelowy_dystans + ' km' : 'brak konkretnego celu dystansowego'}
+      Preferowana pora treningu określona przez zawodnika: ${preferowana_pora === 'poranek' ? 'Rano (przed 12:00)' : preferowana_pora === 'popoludnie' ? 'Popołudnie (12:00 - 17:00)' : 'Wieczór (po 17:00)'}
       Notatki/Samopoczucie użytkownika: ${notatkiRaw || 'brak'}
       
       HISTORIA OSTATNICH TRENINGÓW:
@@ -237,17 +239,17 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
         1. Jeśli wskaźniki regeneracji są bardzo niskie (np. HRV znacznie poniżej normy, sen poniżej 55, Body Battery poniżej 40, lub użytkownik zgłasza ból, przeziębienie czy silne przemęczenie) -> Zasugeruj dzień regeneracji (is_rest_day: true).
         2. Jeśli wskaźniki są dobre -> Zaproponuj trening (is_rest_day: false). 
            - Rodzaj treningu (workout_type): Dostosuj do głównej dyscypliny (${glownaDyscyplina}) lub zaproponuj domową Siłownię ('Siłownia') w oparciu o posiadany sprzęt (ławeczka, wolne ciężary, gumy).
-           - Pora treningu (workout_time): Wybierz 'poranek', 'popoludnie' lub 'wieczor' na podstawie jego notatek lub zaleceń fizjologicznych.
            
-           === OBSŁUGA LIMITÓW I CELÓW ZAWODNIKA ===
-           - JEŚLI użytkownik zadeklarował docelowy dystans (docelowy dystans > 0, np. 70 km): Zaplanuj trening dokładnie pod ten dystans! Oblicz w analizie szacowany czas trwania takiej trasy na podstawie poziomu i ukształtowania terenu, a następnie odpowiednio zwiększ kaloryczność diety i timing posiłków pod taki wydatek energetyczny.
-           - JEŚLI nie podał dystansu, ale podał czas wolny (czas wolny > 0): Zaplanuj trening, który idealnie mieści się w podanym limicie czasowym.
+           === OBSŁUGA LIMITÓW, CELÓW I PORY DNIA ZAWODNIKA ===
+           - WARUNEK PORY DNIA: Jeśli planujesz trening, BEZWZGLĘDNIE zaplanuj go na preferowaną przez niego porę dnia (zwróć tę samą wartość w polu 'workout_time': 'poranek', 'popoludnie' lub 'wieczor').
+           - JEŚLI zadeklarował dystans (dystans > 0): Zaplanuj jednostkę pod ten dystans! Oblicz czas trwania i dostosuj dietę oraz timing posiłków pod taki wydatek energetyczny.
+           - JEŚLI nie podał dystansu, ale podał czas (czas > 0): Zaplanuj jednostkę mieszczącą się w tym limicie.
 
         3. PLAN REGENERACJI (Gdy is_rest_day to true):
            - Napisz krótki tekst o regeneracji, ale jeśli to możliwe, dodaj zalecenia na bardzo lekkie ćwiczenia aktywacyjne/stabilizacyjne w domu (np. planki, mobilność, lekkie rozciąganie, ćwiczenia na gumach oporowych na ławce).
 
         4. DIETA (Nutrient Timing):
-           - Zawsze rozpisz pełne menu na cały dzień z dostosowaniem makroskładników do pory treningu (wysokie węglowodany po treningu, lekkostrawne węglowodany przed rannym treningiem) lub zbilansowane, niskowęglowodanowe posiłki w przypadku Rest Day.
+           - Zawsze rozpisz pełne menu na cały dzień z dostosowaniem makroskładników do wybranej przez zawodnika pory treningu (wysokie węglowodany bezpośrednio po treningu, lekkostrawne węglowodany przed rannym treningiem) lub zbilansowane, niskowęglowodanowe posiłki w przypadku Rest Day.
 
         === WYMAGANY FORMAT ODPOWIEDZI (JSON) ===
         Zwróć odpowiedź wyłącznie w formacie JSON o podanej niżej strukturze pól:
@@ -343,7 +345,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
     console.error("Błąd generowania analizy przez Gemini:", err);
   }
 
-  // Zapis do Supabase (czas_na_trening zostanie zapisany w bazie, a docelowy_dystans zapisze się na początku kolumny 'notatki')
+  // Zapis do Supabase (wybrana pora dnia automatycznie zostanie zapisana w kolumnie workout_time)
   const { error: insertError } = await supabase
     .from('poranki')
     .insert([{
