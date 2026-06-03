@@ -175,7 +175,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
   const oczekiwania = profile?.oczekiwania_od_trenera || 'Spokojne i wspierające doradztwo';
   const celeSportowe = profile?.cele_sportowe || 'Zdrowie i sprawność';
 
-  // 3. POBRANIE HISTORII OSTATNICH TRENINGÓW (Dla pełnego kontekstu obciążenia AI)
+  // 3. Pobranie historii ostatnich treningów
   const { data: recentWorkouts } = await supabase
     .from('treningi')
     .select('data, rodzaj, dystans, czas_minuty, tetno_srednie')
@@ -187,7 +187,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
     ? recentWorkouts.map(w => `- ${w.data}: ${w.rodzaj}, ${w.dystans ? w.dystans + 'km' : ''} ${w.czas_minuty}min, tętno śr: ${w.tetno_srednie || 'brak'} bpm`).join('\n')
     : 'Brak wcześniejszych treningów w bazie.';
 
-  // Inicjalizacja domyślnych wartości (na wypadek problemów z API)
+  // Inicjalizacja domyślnych wartości
   let aiAnaliza = "";
   let is_rest_day = false;
   let workout_type = glownaDyscyplina;
@@ -196,18 +196,17 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
-      const prompt = `Przeanalizuj dzisiejszy poranek zawodnika o imieniu ${imie} i podejmij autonomiczną decyzję treningową:
+      const prompt = `Przeanalizuj dzisiejszy poranek zawodnika o imieniu ${imie} i zaproponuj sugerowane zalecenia:
       Waga: ${waga} kg
       HRV: ${hrv} ms
       Body Battery: ${body_battery}
       Jakość snu: ${jakosc_snu}/100
-      Czas na ewentualną aktywność dzisiaj: ${czas_na_trening} minut
+      Czas na aktywność dzisiaj: ${czas_na_trening} minut
       Notatki/Samopoczucie użytkownika: ${notatki || 'brak'}
       
       HISTORIA OSTATNICH TRENINGÓW:
       ${workoutsHistoryString}`;
 
-      // Dopasowanie osobowości trenera
       let persona = "";
       if (glownaDyscyplina === 'Rower') {
         persona = `Jesteś wybitnym Trenerem Kolarskim, fizjologiem i ekspertem żywienia. Komunikuj się z pasją, kolarskim humorem (🚴‍♂️, 📻, 🚀). Fundamentem jest Strefa 2 (${zone2.min}-${zone2.max} bpm).`;
@@ -217,92 +216,126 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
         persona = `Jesteś ciepłym Mentorem Zdrowotnym, ekspertem ds. longevity. Tętno podczas marszu: 90-105 bpm. Używaj wspierających emotikonów (🌳, 🚶‍♂️, ☀️).`;
       }
 
-      // Precyzyjne instrukcje decyzyjne z wymogiem zwrotu formatu JSON
-// Precyzyjne instrukcje decyzyjne z kategorycznym wymogiem poprawności JSON-a
-const dynamicSystemInstruction = `
-${persona}
-Twój podopieczny to ${imie}, wiek: ${wiek} lat.
-Poziom: ${poziom}. Cel wagowy: ${celWagowy}. Cele sportowe: ${celeSportowe}. Oczekiwania: ${oczekiwania}.
+      const dynamicSystemInstruction = `
+        ${persona}
+        Twój podopieczny to ${imie}, wiek: ${wiek} lat.
+        Poziom: ${poziom}. Cel wagowy: ${celWagowy}. Cele sportowe: ${celeSportowe}. Oczekiwania: ${oczekiwania}.
 
-=== TWOJA ROLA JAKO DECYDENTA ===
-Przeanalizuj stan biologiczny podopiecznego (HRV, Sen, Body Battery, jego notatki o samopoczuciu oraz ostatnie treningi). 
-Musisz samodzielnie podjąć decyzję, czy dzisiaj zalecasz trening, czy dzień regeneracji (Rest Day).
+        === TWOJA ROLA JAKO DORADCY ===
+        Przeanalizuj stan biologiczny podopiecznego (HRV, Sen, Body Battery, jego notatki o samopoczuciu oraz ostatnie treningi). 
+        Zasugeruj decyzję, czy dzisiaj zalecasz trening, czy dzień regeneracji (Rest Day). Decyzja ma charakter wspierający – to zawodnik decyduje.
+        
+        ZASADY FIZJOLOGICZNE:
+        1. Jeśli wskaźniki regeneracji są bardzo niskie (np. HRV znacznie poniżej normy, sen poniżej 55, Body Battery poniżej 40, lub użytkownik zgłasza ból, przeziębienie czy silne przemęczenie) -> Zasugeruj dzień regeneracji (is_rest_day: true).
+        2. Jeśli wskaźniki są dobre -> Zaproponuj trening (is_rest_day: false). 
+           - Rodzaj treningu (workout_type): Dostosuj do głównej dyscypliny (${glownaDyscyplina}) lub zaproponuj domową Siłownię ('Siłownia') w oparciu o posiadany sprzęt (ławeczka, wolne ciężary, gumy), jeśli wymaga tego faza treningowa.
+           - Pora treningu (workout_time): Wybierz 'poranek', 'popoludnie' lub 'wieczor' na podstawie jego notatek lub zaleceń fizjologicznych.
 
-ZASADY FIZJOLOGICZNE:
-1. Jeśli wskaźniki regeneracji są bardzo niskie (np. HRV znacznie poniżej normy, sen poniżej 55, Body Battery poniżej 40, lub użytkownik zgłasza ból, przeziębienie czy silne przemęczenie) -> BEZWZGLĘDNIE wyznacz DZIEŃ REGENERACJI (is_rest_day: true).
-2. Jeśli wskaźniki są dobre -> Zaplanuj trening (is_rest_day: false). 
-   - Rodzaj treningu (workout_type): Dostosuj do głównej dyscypliny (${glownaDyscyplina}) lub zaproponuj domową Siłownię ('Siłownia') w oparciu o posiadany sprzęt (ławeczka, wolne ciężary, gumy), jeśli wymaga tego faza treningowa.
-   - Pora treningu (workout_time): Wybierz 'poranek', 'popoludnie' lub 'wieczor' na podstawie jego notatek lub zaleceń fizjologicznych.
+        3. PLAN REGENERACJI (Gdy is_rest_day to true):
+           - Napisz krótki tekst o regeneracji, ale jeśli to możliwe, dodaj zalecenia na bardzo lekkie ćwiczenia aktywacyjne/stabilizacyjne w domu (np. planki, mobilność, lekkie rozciąganie, ćwiczenia na gumach oporowych na ławce).
 
-3. PLAN REGENERACJI (Gdy is_rest_day to true):
-   - Napisz krótki tekst o regeneracji, ale jeśli to możliwe, dodaj zalecenia na bardzo lekkie ćwiczenia aktywacyjne/stabilizacyjne w domu (np. planki, mobilność, lekkie rozciąganie, ćwiczenia na gumach oporowych na ławce).
+        4. DIETA (Nutrient Timing):
+           - Zawsze rozpisz pełne menu na cały dzień z dostosowaniem makroskładników do pory treningu (wysokie węglowodany po treningu, lekkostrawne węglowodany przed rannym treningiem) lub zbilansowane, niskowęglowodanowe posiłki w przypadku Rest Day.
 
-4. DIETA (Nutrient Timing):
-   - Zawsze rozpisz pełne menu na cały dzień z dostosowaniem makroskładników do pory treningu (wysokie węglowodany po treningu, lekkostrawne węglowodany przed rannym treningiem) lub zbilansowane, niskowęglowodanowe posiłki w przypadku Rest Day.
+        === WYMAGANY FORMAT ODPOWIEDZI (JSON) ===
+        Zwróć odpowiedź wyłącznie w formacie JSON o podanej niżej strukturze pól:
+        {
+          "is_rest_day": true / false,
+          "workout_type": "Rower" | "Bieg" | "Siłownia" | "Brak",
+          "workout_time": "poranek" | "popoludnie" | "wieczor" | "none",
+          "ai_analiza": "Tutaj umieść całą swoją analizę poranną, plan treningowy lub regeneracyjny oraz protokół dietetyczny rozpisany w formacie Markdown."
+        }
+      `;
 
-=== KATEGORYCZNE WYMAGANIA TECHNICZNE FORMATU JSON ===
-Zwróć odpowiedź WYŁĄCZNIE w formacie JSON o podanej niżej strukturze. 
-NIE dodawaj na początku ani na końcu odpowiedzi żadnych znaczników bloków kodu markdown typu \`\`\`json ani \`\`\`.
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: dynamicSystemInstruction }] },
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            generationConfig: {
+              responseMimeType: "application/json"
+            }
+          })
+        }
+      );
 
-BARDZO WAŻNE: Wartość pola "ai_analiza" musi być poprawnym ciągiem znaków JSON. 
-Każda nowa linia wewnątrz tekstu Markdown musi być bezwzględnie zapisana jako symbol "znaku ucieczki" \\n (dwuznak backslash i n), a nie jako fizyczne przejście do nowej linii w tekście odpowiedzi! Wszystkie cudzysłowy wewnątrz tekstu muszą być poprzedzone backslashem (\\").
+      if (response.ok) {
+        const resData = await response.json() as any;
+        const rawJsonText = resData.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+        
+        let cleanedJsonText = rawJsonText.trim();
+        if (cleanedJsonText.startsWith("```")) {
+          cleanedJsonText = cleanedJsonText.replace(/^```json\s*/i, "");
+          cleanedJsonText = cleanedJsonText.replace(/```$/, "");
+          cleanedJsonText = cleanedJsonText.trim();
+        }
 
-Struktura pól:
-{
-  "is_rest_day": true / false,
-  "workout_type": "Rower" | "Bieg" | "Siłownia" | "Brak",
-  "workout_time": "poranek" | "popoludnie" | "wieczor" | "none",
-  "ai_analiza": "Tutaj umieść całą swoją analizę poranną, plan treningowy lub regeneracyjny oraz protokół dietetyczny rozpisany w formacie Markdown."
-}
-`;
+        try {
+          // Próba standardowego parsowania JSON
+          const decisionObj = JSON.parse(cleanedJsonText);
+          
+          is_rest_day = decisionObj.is_rest_day === true;
+          workout_type = decisionObj.workout_type || "Brak";
+          workout_time = decisionObj.workout_time || "none";
+          aiAnaliza = decisionObj.ai_analiza || "Błąd generowania analizy.";
+        } catch (jsonErr) {
+          console.warn("Standardowe parsowanie JSON nie powiodło się, uruchamiam bezpieczny fallback parser:", jsonErr);
+          
+          // ODPORNY FALLBACK PARSER (Regex) - przetwarza tekst linia po linii, ignorując błędy składniowe JSON-a
+          const restDayMatch = cleanedJsonText.match(/"is_rest_day"\s*:\s*(true|false)/i);
+          if (restDayMatch) {
+            is_rest_day = restDayMatch[1].toLowerCase() === 'true';
+          }
 
-// Wywołanie Gemini API z wymuszeniem wyjścia JSON
-const response = await fetch(
-`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-{
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    systemInstruction: { parts: [{ text: dynamicSystemInstruction }] },
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseMimeType: "application/json"
-    }
-  })
-}
-);
+          const typeMatch = cleanedJsonText.match(/"workout_type"\s*:\s*"([^"]+)"/i);
+          if (typeMatch) {
+            workout_type = typeMatch[1];
+          }
 
-if (response.ok) {
-const resData = await response.json() as any;
-const rawJsonText = resData.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+          const timeMatch = cleanedJsonText.match(/"workout_time"\s*:\s*"([^"]+)"/i);
+          if (timeMatch) {
+            workout_time = timeMatch[1];
+          }
 
-try {
-  // Oczyszczanie tekstu z ewentualnych bloków kodu markdown (np. ```json ... ```)
-  let cleanedJsonText = rawJsonText.trim();
-  if (cleanedJsonText.startsWith("```")) {
-    cleanedJsonText = cleanedJsonText.replace(/^```json\s*/i, "");
-    cleanedJsonText = cleanedJsonText.replace(/```$/, "");
-    cleanedJsonText = cleanedJsonText.trim();
-  }
+          // Wyodrębnianie tekstu "ai_analiza" bezpośrednio z tekstu, bez względu na entery i znaki nowej linii
+          const analizaIndex = cleanedJsonText.indexOf('"ai_analiza"');
+          if (analizaIndex !== -1) {
+            let tempText = cleanedJsonText.substring(analizaIndex);
+            const firstQuoteIndex = tempText.indexOf('"', tempText.indexOf(':'));
+            if (firstQuoteIndex !== -1) {
+              let contentText = tempText.substring(firstQuoteIndex + 1);
+              contentText = contentText.trim();
+              
+              if (contentText.endsWith('}')) {
+                contentText = contentText.substring(0, contentText.lastIndexOf('}')).trim();
+              }
+              if (contentText.endsWith('"')) {
+                contentText = contentText.substring(0, contentText.length - 1);
+              }
 
-  // Parsowanie bezpieczne
-  const decisionObj = JSON.parse(cleanedJsonText);
-  
-  is_rest_day = decisionObj.is_rest_day === true;
-  workout_type = decisionObj.workout_type || "Brak";
-  workout_time = decisionObj.workout_time || "none";
-  aiAnaliza = decisionObj.ai_analiza || "Błąd generowania analizy.";
-} catch (jsonErr) {
-  console.error("Błąd parsowania decyzji JSON od Gemini:", jsonErr, rawJsonText);
-  aiAnaliza = `Nie udało się sparsować ustrukturyzowanej decyzji trenera AI.\n\nSurowa odpowiedź modelu:\n${rawJsonText}`;
-}
-}
+              // Zamiana znaków ucieczki na rzeczywiste przejścia do nowej linii i cudzysłowy
+              aiAnaliza = contentText
+                .replace(/\\n/g, '\n')
+                .replace(/\\"/g, '"')
+                .replace(/\\'/g, "'")
+                .trim();
+            }
+          }
+
+          if (!aiAnaliza) {
+            aiAnaliza = `Nie udało się sparsować decyzji trenera AI.\n\nSurowa odpowiedź modelu:\n${rawJsonText}`;
+          }
+        }
+      }
     }
   } catch (err) {
     console.error("Błąd generowania analizy przez Gemini:", err);
   }
 
-  // Zapis do Supabase uwzględniający wyznaczone automatycznie przez AI wartości
+  // Zapis do Supabase uwzględniający wyznaczone wartości
   const { error: insertError } = await supabase
     .from('poranki')
     .insert([{
