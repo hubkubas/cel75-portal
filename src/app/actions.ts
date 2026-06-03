@@ -161,7 +161,13 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
   const body_battery = parseInt(formData.get('body_battery') as string, 10) || 0;
   const jakosc_snu = parseInt(formData.get('jakosc_snu') as string, 10) || 0;
   const czas_na_trening = parseInt(formData.get('czas_na_trening') as string, 10) || 0;
-  const notatki = (formData.get('notatki') as string) || '';
+  const docelowy_dystans = parseFloat(formData.get('docelowy_dystans') as string) || 0; // Opcjonalny dystans
+  let notatkiRaw = (formData.get('notatki') as string) || '';
+
+  // Zapisujemy cel dystansowy bezpośrednio w notatkach, aby zachować go w bazie bez migracji kolumn
+  const notatki = docelowy_dystans > 0 
+    ? `[Cel: ${docelowy_dystans} km] ${notatkiRaw}`.trim() 
+    : notatkiRaw;
 
   // 2. Pobieranie profilu użytkownika
   const { data: profile } = await supabase.from('profile').select('*').eq('id', user.id).single();
@@ -196,13 +202,15 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
+      // Wzbogacenie promptu o parametry ograniczające (czas lub dystans)
       const prompt = `Przeanalizuj dzisiejszy poranek zawodnika o imieniu ${imie} i zaproponuj sugerowane zalecenia:
       Waga: ${waga} kg
       HRV: ${hrv} ms
       Body Battery: ${body_battery}
       Jakość snu: ${jakosc_snu}/100
-      Czas na aktywność dzisiaj: ${czas_na_trening} minut
-      Notatki/Samopoczucie użytkownika: ${notatki || 'brak'}
+      Ograniczenie czasowe na dziś: ${czas_na_trening > 0 ? czas_na_trening + ' minut' : 'brak konkretnego limitu czasowego'}
+      Docelowy dystans zadeklarowany przez zawodnika: ${docelowy_dystans > 0 ? docelowy_dystans + ' km' : 'brak konkretnego celu dystansowego'}
+      Notatki/Samopoczucie użytkownika: ${notatkiRaw || 'brak'}
       
       HISTORIA OSTATNICH TRENINGÓW:
       ${workoutsHistoryString}`;
@@ -223,13 +231,17 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
 
         === TWOJA ROLA JAKO DORADCY ===
         Przeanalizuj stan biologiczny podopiecznego (HRV, Sen, Body Battery, jego notatki o samopoczuciu oraz ostatnie treningi). 
-        Zasugeruj decyzję, czy dzisiaj zalecasz trening, czy dzień regeneracji (Rest Day). Decyzja ma charakter wspierający – to zawodnik decyduje.
+        Zasugeruj decyzję, czy dzisiaj zalecasz trening, czy dzień regeneracji (Rest Day).
         
         ZASADY FIZJOLOGICZNE:
         1. Jeśli wskaźniki regeneracji są bardzo niskie (np. HRV znacznie poniżej normy, sen poniżej 55, Body Battery poniżej 40, lub użytkownik zgłasza ból, przeziębienie czy silne przemęczenie) -> Zasugeruj dzień regeneracji (is_rest_day: true).
         2. Jeśli wskaźniki są dobre -> Zaproponuj trening (is_rest_day: false). 
-           - Rodzaj treningu (workout_type): Dostosuj do głównej dyscypliny (${glownaDyscyplina}) lub zaproponuj domową Siłownię ('Siłownia') w oparciu o posiadany sprzęt (ławeczka, wolne ciężary, gumy), jeśli wymaga tego faza treningowa.
+           - Rodzaj treningu (workout_type): Dostosuj do głównej dyscypliny (${glownaDyscyplina}) lub zaproponuj domową Siłownię ('Siłownia') w oparciu o posiadany sprzęt (ławeczka, wolne ciężary, gumy).
            - Pora treningu (workout_time): Wybierz 'poranek', 'popoludnie' lub 'wieczor' na podstawie jego notatek lub zaleceń fizjologicznych.
+           
+           === OBSŁUGA LIMITÓW I CELÓW ZAWODNIKA ===
+           - JEŚLI użytkownik zadeklarował docelowy dystans (docelowy dystans > 0, np. 70 km): Zaplanuj trening dokładnie pod ten dystans! Oblicz w analizie szacowany czas trwania takiej trasy na podstawie poziomu i ukształtowania terenu, a następnie odpowiednio zwiększ kaloryczność diety i timing posiłków pod taki wydatek energetyczny.
+           - JEŚLI nie podał dystansu, ale podał czas wolny (czas wolny > 0): Zaplanuj trening, który idealnie mieści się w podanym limicie czasowym.
 
         3. PLAN REGENERACJI (Gdy is_rest_day to true):
            - Napisz krótki tekst o regeneracji, ale jeśli to możliwe, dodaj zalecenia na bardzo lekkie ćwiczenia aktywacyjne/stabilizacyjne w domu (np. planki, mobilność, lekkie rozciąganie, ćwiczenia na gumach oporowych na ławce).
@@ -274,7 +286,6 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
         }
 
         try {
-          // Próba standardowego parsowania JSON
           const decisionObj = JSON.parse(cleanedJsonText);
           
           is_rest_day = decisionObj.is_rest_day === true;
@@ -284,7 +295,6 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
         } catch (jsonErr) {
           console.warn("Standardowe parsowanie JSON nie powiodło się, uruchamiam bezpieczny fallback parser:", jsonErr);
           
-          // ODPORNY FALLBACK PARSER (Regex) - przetwarza tekst linia po linii, ignorując błędy składniowe JSON-a
           const restDayMatch = cleanedJsonText.match(/"is_rest_day"\s*:\s*(true|false)/i);
           if (restDayMatch) {
             is_rest_day = restDayMatch[1].toLowerCase() === 'true';
@@ -300,7 +310,6 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
             workout_time = timeMatch[1];
           }
 
-          // Wyodrębnianie tekstu "ai_analiza" bezpośrednio z tekstu, bez względu na entery i znaki nowej linii
           const analizaIndex = cleanedJsonText.indexOf('"ai_analiza"');
           if (analizaIndex !== -1) {
             let tempText = cleanedJsonText.substring(analizaIndex);
@@ -316,7 +325,6 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
                 contentText = contentText.substring(0, contentText.length - 1);
               }
 
-              // Zamiana znaków ucieczki na rzeczywiste przejścia do nowej linii i cudzysłowy
               aiAnaliza = contentText
                 .replace(/\\n/g, '\n')
                 .replace(/\\"/g, '"')
@@ -335,7 +343,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
     console.error("Błąd generowania analizy przez Gemini:", err);
   }
 
-  // Zapis do Supabase uwzględniający wyznaczone wartości
+  // Zapis do Supabase (czas_na_trening zostanie zapisany w bazie, a docelowy_dystans zapisze się na początku kolumny 'notatki')
   const { error: insertError } = await supabase
     .from('poranki')
     .insert([{

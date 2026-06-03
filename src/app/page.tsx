@@ -244,8 +244,8 @@ export default async function Page() {
               </p>
 
               <form action={saveMorningReport} className="space-y-5">
-                {/* 5-kolumnowy grid metryk biologicznych i czasowych */}
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+                {/* 6-kolumnowy grid metryk biologicznych, czasowych i dystansowych */}
+                <div className="grid grid-cols-2 sm:grid-cols-6 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 mb-1.5">Waga (kg)</label>
                     <input 
@@ -287,15 +287,24 @@ export default async function Page() {
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-emerald-500" 
                     />
                   </div>
-                  {/* Czas na trening pobieramy tutaj, aby AI wiedziało ile maksymalnie czasu zaplanować */}
-                  <div className="col-span-2 sm:col-span-1">
+                  <div>
                     <label className="block text-xs font-semibold text-slate-400 mb-1.5">Czas wolny (min)</label>
                     <input 
                       type="number" 
                       name="czas_na_trening" 
-                      required 
-                      defaultValue="60" 
-                      placeholder="np. 60" 
+                      defaultValue="0" 
+                      placeholder="np. 90" 
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-orange-500" 
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Lub dystans (km)</label>
+                    <input 
+                      type="number" 
+                      name="docelowy_dystans" 
+                      step="0.1"
+                      defaultValue="0" 
+                      placeholder="np. 70" 
                       className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-orange-500" 
                     />
                   </div>
