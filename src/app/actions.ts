@@ -155,47 +155,59 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
 
   if (existing) return;
 
-  // Pobieranie danych z formularza (w tym nowych pól)
+  // 1. Pobieranie danych wprowadzonych przez użytkownika
   const waga = parseFloat(formData.get('waga') as string) || 0;
   const hrv = parseInt(formData.get('hrv') as string, 10) || 0;
   const body_battery = parseInt(formData.get('body_battery') as string, 10) || 0;
   const jakosc_snu = parseInt(formData.get('jakosc_snu') as string, 10) || 0;
   const czas_na_trening = parseInt(formData.get('czas_na_trening') as string, 10) || 0;
   const notatki = (formData.get('notatki') as string) || '';
-  
-  // NOWE POLA Z FORMULARZA
-  const is_rest_day = formData.get('is_rest_day') === 'true';
-  const workout_type = (formData.get('workout_type') as string) || 'Rower';
-  const workout_time = (formData.get('workout_time') as string) || 'popoludnie';
 
+  // 2. Pobieranie profilu użytkownika
   const { data: profile } = await supabase.from('profile').select('*').eq('id', user.id).single();
 
   const imie = profile?.imie || 'zawodnik';
   const wiek = profile?.wiek || '';
   const zone2 = profile?.strefy_tetna?.zone2 || { min: 105, max: 115 };
-  const kadencja = profile?.strefy_tetna?.kadencja_target || 90;
   const glownaDyscyplina = profile?.glowna_dyscyplina || 'Rower';
   const celWagowy = profile?.cel_wagowy || 'Utrzymanie wagi';
   const poziom = profile?.poziom_zaawansowania || 'Początkujący';
   const oczekiwania = profile?.oczekiwania_od_trenera || 'Spokojne i wspierające doradztwo';
   const celeSportowe = profile?.cele_sportowe || 'Zdrowie i sprawność';
 
+  // 3. POBRANIE HISTORII OSTATNICH TRENINGÓW (Dla pełnego kontekstu obciążenia AI)
+  const { data: recentWorkouts } = await supabase
+    .from('treningi')
+    .select('data, rodzaj, dystans, czas_minuty, tetno_srednie')
+    .eq('user_id', user.id)
+    .order('data', { ascending: false })
+    .limit(3);
+
+  const workoutsHistoryString = recentWorkouts && recentWorkouts.length > 0
+    ? recentWorkouts.map(w => `- ${w.data}: ${w.rodzaj}, ${w.dystans ? w.dystans + 'km' : ''} ${w.czas_minuty}min, tętno śr: ${w.tetno_srednie || 'brak'} bpm`).join('\n')
+    : 'Brak wcześniejszych treningów w bazie.';
+
+  // Inicjalizacja domyślnych wartości (na wypadek problemów z API)
   let aiAnaliza = "";
+  let is_rest_day = false;
+  let workout_type = glownaDyscyplina;
+  let workout_time = "popoludnie";
+
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey) {
-      const prompt = `Przeanalizuj dzisiejszy poranek zawodnika o imieniu ${imie}:
+      const prompt = `Przeanalizuj dzisiejszy poranek zawodnika o imieniu ${imie} i podejmij autonomiczną decyzję treningową:
       Waga: ${waga} kg
       HRV: ${hrv} ms
       Body Battery: ${body_battery}
       Jakość snu: ${jakosc_snu}/100
-      Dzień bez treningu (Rest Day): ${is_rest_day ? 'TAK' : 'NIE'}
-      Planowany rodzaj treningu: ${is_rest_day ? 'brak' : workout_type}
-      Planowana pora treningu: ${is_rest_day ? 'brak' : workout_time}
-      Czas na aktywność dzisiaj: ${czas_na_trening} minut
-      Notatki użytkownika: ${notatki || 'brak'}`;
+      Czas na ewentualną aktywność dzisiaj: ${czas_na_trening} minut
+      Notatki/Samopoczucie użytkownika: ${notatki || 'brak'}
+      
+      HISTORIA OSTATNICH TRENINGÓW:
+      ${workoutsHistoryString}`;
 
-      // Budowanie Persony Trenera
+      // Dopasowanie osobowości trenera
       let persona = "";
       if (glownaDyscyplina === 'Rower') {
         persona = `Jesteś wybitnym Trenerem Kolarskim, fizjologiem i ekspertem żywienia. Komunikuj się z pasją, kolarskim humorem (🚴‍♂️, 📻, 🚀). Fundamentem jest Strefa 2 (${zone2.min}-${zone2.max} bpm).`;
@@ -205,43 +217,39 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
         persona = `Jesteś ciepłym Mentorem Zdrowotnym, ekspertem ds. longevity. Tętno podczas marszu: 90-105 bpm. Używaj wspierających emotikonów (🌳, 🚶‍♂️, ☀️).`;
       }
 
-      // TWARDY PROMPT Z NOWYMI ZASADAMI
+      // Precyzyjne instrukcje decyzyjne z wymogiem zwrotu formatu JSON
       const dynamicSystemInstruction = `
         ${persona}
         Twój podopieczny to ${imie}, wiek: ${wiek} lat.
         Poziom: ${poziom}. Cel wagowy: ${celWagowy}. Cele sportowe: ${celeSportowe}. Oczekiwania: ${oczekiwania}.
 
-        === KATEGORYCZNE ZASADY GENEROWANIA RAPORTU ===
+        === TWOJA ROLA JAKO DECYDENTA ===
+        Przeanalizuj stan biologiczny podopiecznego (HRV, Sen, Body Battery, jego notatki o samopoczuciu oraz ostatnie treningi). 
+        Musisz samodzielnie podjąć decyzję, czy dzisiaj zalecasz trening, czy dzień regeneracji (Rest Day).
+        
+        ZASADY FIZJOLOGICZNE:
+        1. Jeśli wskaźniki regeneracji są bardzo niskie (np. HRV znacznie poniżej normy, sen poniżej 55, Body Battery poniżej 40, lub użytkownik zgłasza ból, przeziębienie czy silne przemęczenie) -> BEZWZGLĘDNIE wyznacz DZIEŃ REGENERACJI (is_rest_day: true).
+        2. Jeśli wskaźniki są dobre -> Zaplanuj trening (is_rest_day: false). 
+           - Rodzaj treningu (workout_type): Dostosuj do głównej dyscypliny (${glownaDyscyplina}) lub zaproponuj domową Siłownię ('Siłownia') w oparciu o posiadany sprzęt (ławeczka, wolne ciężary, gumy), jeśli wymaga tego faza treningowa.
+           - Pora treningu (workout_time): Wybierz 'poranek', 'popoludnie' lub 'wieczor' na podstawie jego notatek (np. jeśli pisze, że może trenować tylko rano/wieczorem) lub zaleceń fizjologicznych.
 
-        1. TRENING NA DZIŚ:
-        - Jeśli "Dzień bez treningu" = TAK: BEZWZGLĘDNIE ZABRANIAM generowania jakiegokolwiek planu treningowego. Napisz tylko 1-2 zdania o regeneracji (np. spacer, rolowanie).
-        - Jeśli "Planowany rodzaj treningu" = Siłownia: Wygeneruj plan treningu siłowego. Użytkownik ma w domu TYLKO: ławeczkę, wolne ciężary i gumy oporowe. Dostosuj plan do tego sprzętu!
-        - Jeśli "Planowany rodzaj treningu" = Rower/Bieg: Wygeneruj normalny plan wg czasu i notatek.
+        3. PLAN REGENERACJI (Gdy is_rest_day to true):
+           - Napisz krótki tekst o regeneracji, ale jeśli to możliwe, dodaj zalecenia na bardzo lekkie ćwiczenia aktywacyjne/stabilizacyjne w domu (np. planki, mobilność, lekkie rozciąganie, ćwiczenia na gumach oporowych na ławce).
 
-        2. DIETA (CAŁY DZIEŃ i NUTRIENT TIMING):
-        - ZAWSZE generuj pełne menu na CAŁY DZIEŃ z podziałem na posiłki.
-        - Dostosuj pory posiłków i rozkład makroskładników bezpośrednio do pory treningu ("Planowana pora treningu"):
-          * Jeśli trening jest RANO (poranek):
-            -> Śniadanie: Wybitnie lekkostrawne węglowodany (np. owsianka na wodzie, banan, tost z dżemem) - paliwo bezpośrednio przed wysiłkiem.
-            -> Obiad: Obfity posiłek potreningowy (wysokie węglowodany i białko, niska zawartość tłuszczu dla szybkiej odbudowy glikogenu).
-            -> Kolacja: Lekka, zbilansowana (białko i zdrowe tłuszcze, mało węglowodanów).
-          * Jeśli trening jest POPOŁUDNIU (popołudnie):
-            -> Śniadanie: Zbilansowane, bogate w białko i tłuszcze (np. jajecznica z awokado, omlet), średnia ilość węglowodanów.
-            -> Obiad: Lekki posiłek przedtreningowy o średnim/niskim indeksie glikemicznym (zjedzony 2-3h przed startem).
-            -> Kolacja: Potężna dawka potreningowej regeneracji (węglowodany + białko do odbudowy).
-          * Jeśli trening jest WIECZOREM (wieczór):
-            -> Śniadanie i Obiad: Standardowe, pełnowartościowe posiłki zbilansowane.
-            -> Podwieczorek / Przekąska przedtreningowa: Szybkie węglowodany na 1h przed wieczornym wyjściem.
-            -> Kolacja: Posiłek potreningowy (białko + lekkostrawne węglowodany, np. kasza manna z odżywką białkową, by nie obciążać żołądka przed snem).
-          * Jeśli to Dzień bez treningu:
-            -> Rozpisz zbilansowane, lekko niskowęglowodanowe posiłki regeneracyjne rozłożone równomiernie na cały dzień, bez nagłych skoków insuliny.
+        4. DIETA (Nutrient Timing):
+           - Zawsze rozpisz pełne menu na cały dzień z dostosowaniem makroskładników do pory treningu (wysokie węglowodany po treningu, lekkostrawne węglowodany przed rannym treningiem) lub zbilansowane, niskowęglowodanowe posiłki w przypadku Rest Day.
 
-        === WYMAGANA STRUKTURA ODPOWIEDZI (Używaj Markdown) ===
-        # 🎙️ Odprawa i analiza poranna (HRV, Sen)
-        # ${is_rest_day ? '🧘‍♂️ Regeneracja (Dzień bez treningu)' : (workout_type === 'Siłownia' ? '🏋️‍♂️ Domowy Plan Siłowy' : '🚴‍♂️ Plan Treningowy')}
-        # 🥞 Protokół Dietetyczny (Menu na cały dzień)
+        === WYMAGANY FORMAT ODPOWIEDZI (JSON) ===
+        Musisz zwrócić odpowiedź wyłącznie w formacie JSON o następującej strukturze pól:
+        {
+          "is_rest_day": true / false,
+          "workout_type": "Rower" | "Bieg" | "Siłownia" | "Brak",
+          "workout_time": "poranek" | "popoludnie" | "wieczor" | "none",
+          "ai_analiza": "Tutaj umieść całą swoją analizę poranną, plan treningowy lub regeneracyjny oraz protokół dietetyczny rozpisany w formacie Markdown (używaj #, ##, list, emotikonów)."
+        }
       `;
 
+      // Wywołanie Gemini API z wymuszeniem wyjścia JSON
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
         {
@@ -249,21 +257,37 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: dynamicSystemInstruction }] },
-            contents: [{ role: "user", parts: [{ text: prompt }] }]
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            generationConfig: {
+              responseMimeType: "application/json"
+            }
           })
         }
       );
 
       if (response.ok) {
         const resData = await response.json() as any;
-        aiAnaliza = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        const rawJsonText = resData.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+        
+        try {
+          // Parsowanie bezpieczne
+          const decisionObj = JSON.parse(rawJsonText);
+          
+          is_rest_day = decisionObj.is_rest_day === true;
+          workout_type = decisionObj.workout_type || "Brak";
+          workout_time = decisionObj.workout_time || "none";
+          aiAnaliza = decisionObj.ai_analiza || "Błąd generowania analizy.";
+        } catch (jsonErr) {
+          console.error("Błąd parsowania decyzji JSON od Gemini:", jsonErr, rawJsonText);
+          aiAnaliza = "Nie udało się sparsować ustrukturyzowanej decyzji trenera AI. Trening domyślny.";
+        }
       }
     }
   } catch (err) {
     console.error("Błąd generowania analizy przez Gemini:", err);
   }
 
-  // Zapis do Supabase uwzględniający nowe pola
+  // Zapis do Supabase uwzględniający wyznaczone automatycznie przez AI wartości
   const { error: insertError } = await supabase
     .from('poranki')
     .insert([{
@@ -278,7 +302,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
       ai_analiza: aiAnaliza || null,
       is_rest_day,
       workout_type,
-      workout_time: is_rest_day ? 'none' : workout_time
+      workout_time
     }]);
 
   if (insertError) console.error("Błąd zapisu poranka w Supabase:", insertError);
