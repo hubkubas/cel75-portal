@@ -689,3 +689,70 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
 export async function analyzeTrainingAction(id: number): Promise<string> {
   return "Analiza wykonana pomyślnie.";
 }
+
+export async function updateProfileAction(
+  prevState: OnboardingState | null,
+  formData: FormData
+): Promise<OnboardingState> {
+  const name = formData.get('name') as string;
+  const ageStr = formData.get('age') as string;
+  const sportProfile = formData.get('sport_profile') as string;
+  const weightGoal = formData.get('weight_goal') as string;
+
+  const age = parseInt(ageStr, 10);
+
+  // 1. Walidacja imienia
+  if (!name || name.trim().length < 2 || name.trim().length > 50) {
+    return { error: 'Imię musi zawierać od 2 do 50 znaków.' };
+  }
+
+  // 2. Walidacja wieku
+  if (!age || isNaN(age) || age < 13 || age > 120) {
+    return { error: 'Podaj poprawny wiek (13-120 lat).' };
+  }
+
+  // 3. Walidacja profilu sportowego
+  const validProfiles = ['Rower', 'Bieg', 'Senior'];
+  if (!validProfiles.includes(sportProfile)) {
+    return { error: 'Nieprawidłowa główna dyscyplina.' };
+  }
+
+  // 4. Walidacja celu wagowego
+  const validGoals = ['Schudnąć', 'Utrzymać', 'Przytyć'];
+  if (!validGoals.includes(weightGoal)) {
+    return { error: 'Nieprawidłowy cel wagowy.' };
+  }
+
+  try {
+    const supabase = await createClient();
+
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      return { error: 'Sesja wygasła. Zaloguj się ponownie.' };
+    }
+
+    // Aktualizacja wiersza użytkownika w tabeli 'profile'
+    const { error } = await supabase
+      .from('profile')
+      .update({
+        imie: name.trim(),
+        wiek: age,
+        glowna_dyscyplina: sportProfile,
+        cel_wagowy: weightGoal,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', user.id);
+
+    if (error) {
+      console.error('Błąd aktualizacji profilu:', error.message);
+      return { error: 'Wystąpił błąd podczas zapisywania zmian.' };
+    }
+
+    revalidatePath('/');
+    return { success: true };
+
+  } catch (err) {
+    console.error('Nieoczekiwany błąd w updateProfileAction:', err);
+    return { error: 'Wystąpił nieoczekiwany błąd serwera.' };
+  }
+}

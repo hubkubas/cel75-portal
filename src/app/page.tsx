@@ -14,6 +14,7 @@ import { SubmitButton } from './submit-button';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/utils/supabase/server';
 import OnboardingForm from '@/components/OnboardingForm';
+import ProfileSettingsModal from '@/components/ProfileSettingsModal';
 
 export const dynamic = 'force-dynamic'; 
 
@@ -55,9 +56,11 @@ export default async function Page() {
   let podtytulFormularza = 'Wprowadź swoje dzisiejsze parametry, aby wygenerować spersonalizowaną odprawę, plan treningowy lub dietę regeneracyjną na dziś.';
   let placeholderNotatek = 'Jak się dziś czujesz? Jakieś dolegliwości? Wpływ wczorajszego protokołu na sen...';
 
+// Przed zmianą: else if (glownaDyscyplina === 'Marsz/Spacer') {
+  // Po zmianie:
   if (glownaDyscyplina === 'Bieg') {
     naglowekFormularza = '👟 Poranny raport biegowy';
-  } else if (glownaDyscyplina === 'Marsz/Spacer') {
+  } else if (glownaDyscyplina === 'Marsz/Spacer' || glownaDyscyplina === 'Senior') {
     naglowekFormularza = '🌳 Poranny raport zdrowotny';
     placeholderNotatek = `Dzień dobry, ${nazwaZalogowanego}! Jak się dzisiaj czujesz? Czy stawy są rozluźnione?`;
   } else if (glownaDyscyplina === 'Rower') {
@@ -84,20 +87,31 @@ export default async function Page() {
     <main className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-6 md:p-8">
       
       {/* GÓRNY PASEK SESJI I LOGOUT */}
-      <div className="max-w-4xl mx-auto mb-6 flex flex-col sm:flex-row justify-between items-center gap-2 py-2.5 px-4 bg-slate-900/40 border border-slate-800/80 rounded-xl text-xs">
+{/* GÓRNY PASEK SESJI I LOGOUT */}
+<div className="max-w-4xl mx-auto mb-6 flex flex-col sm:flex-row justify-between items-center gap-2 py-2.5 px-4 bg-slate-900/40 border border-slate-800/80 rounded-xl text-xs">
         <div className="flex items-center space-x-2">
           <span className="text-slate-400">Zalogowany jako:</span>
           <strong className="text-orange-500 font-bold">{nazwaZalogowanego}</strong>
           <span className="text-slate-500">({user.email})</span>
         </div>
-        <form action={logout}>
-          <button 
-            type="submit" 
-            className="px-3.5 py-1.5 bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 text-[11px] font-semibold text-slate-300 rounded-lg transition-all active:scale-95 cursor-pointer"
-          >
-            Wyloguj się
-          </button>
-        </form>
+        <div className="flex items-center gap-2"> {/* Kontener grupujący przyciski */}
+          <ProfileSettingsModal 
+            initialData={{
+              imie: profile?.imie || '',
+              wiek: profile?.wiek || 30,
+              glowna_dyscyplina: profile?.glowna_dyscyplina || 'Rower',
+              cel_wagowy: profile?.cel_wagowy || 'Utrzymać'
+            }} 
+          />
+          <form action={logout}>
+            <button 
+              type="submit" 
+              className="px-3.5 py-1.5 bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 text-[11px] font-semibold text-slate-300 rounded-lg transition-all active:scale-95 cursor-pointer"
+            >
+              Wyloguj się
+            </button>
+          </form>
+        </div>
       </div>
 
       {/* NAGŁÓWEK PORTALU */}
@@ -111,7 +125,7 @@ export default async function Page() {
           </p>
         </div>
         
-        {glownaDyscyplina !== 'Marsz/Spacer' && <StravaSyncButton />}
+        {glownaDyscyplina !== 'Marsz/Spacer' && glownaDyscyplina !== 'Senior' && <StravaSyncButton />}
       </div>
 
       {/* GŁÓWNY, WYŚRODKOWANY UKŁAD JEDNOKOLUMNOWY */}
@@ -331,7 +345,7 @@ export default async function Page() {
         </section>
 
         {/* 3. NOWY TRENING ZE STRAVY DO ANALIZY */}
-        {unsentWorkout && !todayWorkout && glownaDyscyplina !== 'Marsz/Spacer' && (
+        {unsentWorkout && !todayWorkout && glownaDyscyplina !== 'Marsz/Spacer' && glownaDyscyplina !== 'Senior' && (
           <section className="bg-slate-900 border border-orange-900/40 rounded-2xl p-6 shadow-xl relative overflow-hidden">
             <div className="absolute top-0 right-0 bg-orange-600/15 text-orange-400 text-[10px] uppercase font-extrabold px-3 py-1.5 rounded-bl-xl tracking-wider">
               Nowy trening ze Strava
@@ -421,7 +435,7 @@ export default async function Page() {
           </section>
         )}
 
-      </div>
+      </div> {/* Zamknięcie głównego kontenera space-y-8 */}
 
       <TrainerChat />
     </main>
