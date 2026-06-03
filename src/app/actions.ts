@@ -51,24 +51,30 @@ export async function saveOnboardingAction(
   prevState: OnboardingState | null,
   formData: FormData
 ): Promise<OnboardingState> {
+  const name = formData.get('name') as string; // <-- ODCZYT IMIENIA
   const ageStr = formData.get('age') as string;
   const sportProfile = formData.get('sport_profile') as string; // 'Rower' | 'Bieg' | 'Senior'
   const weightGoal = formData.get('weight_goal') as string; // 'Schudnąć' | 'Utrzymać' | 'Przytyć'
 
   const age = parseInt(ageStr, 10);
 
-  // Walidacja wieku
+  // 1. Walidacja imienia
+  if (!name || name.trim().length < 2 || name.trim().length > 50) {
+    return { error: 'Podaj poprawne imię (od 2 do 50 znaków).' };
+  }
+
+  // 2. Walidacja wieku
   if (!age || isNaN(age) || age < 13 || age > 120) {
     return { error: 'Podaj poprawny wiek (od 13 do 120 lat).' };
   }
 
-  // Walidacja profilu sportowego zgodnie z Twoją strukturą
+  // 3. Walidacja profilu sportowego
   const validProfiles = ['Rower', 'Bieg', 'Senior'];
   if (!validProfiles.includes(sportProfile)) {
     return { error: 'Wybierz jeden z dostępnych profili sportowych.' };
   }
 
-  // Walidacja celu wagowego zgodnie z Twoją strukturą
+  // 4. Walidacja celu wagowego
   const validGoals = ['Schudnąć', 'Utrzymać', 'Przytyć'];
   if (!validGoals.includes(weightGoal)) {
     return { error: 'Wybierz poprawny cel wagowy.' };
@@ -82,11 +88,12 @@ export async function saveOnboardingAction(
       return { error: 'Sesja wygasła. Zaloguj się ponownie.' };
     }
 
-    // Zapisujemy bezpośrednio do Twojej istniejącej tabeli 'profile'
+    // Zapisujemy imię, wiek, dyscyplinę oraz cel do tabeli profile
     const { error } = await supabase
       .from('profile')
       .upsert({
         id: user.id,
+        imie: name.trim(), // <-- ZAPIS IMIENIA
         wiek: age,
         glowna_dyscyplina: sportProfile,
         cel_wagowy: weightGoal,

@@ -5,11 +5,11 @@ import { saveOnboardingAction, OnboardingState } from '@/app/actions'; // Dostos
 
 export default function OnboardingForm() {
   const [step, setStep] = useState(1);
+  const [name, setName] = useState(''); // Stan dla imienia
   const [age, setAge] = useState('');
   const [sportProfile, setSportProfile] = useState('Rower');
   const [weightGoal, setWeightGoal] = useState('Utrzymać');
 
-  // React 19 useActionState do obsługi stanów i błędów serwera
   const [state, formAction, isPending] = useActionState<OnboardingState | null, FormData>(
     saveOnboardingAction,
     null
@@ -30,7 +30,7 @@ export default function OnboardingForm() {
         </div>
       </div>
 
-      {/* Komunikat o błędzie z serwera */}
+      {/* Komunikat o błędzie */}
       {state?.error && (
         <div className="mb-6 p-3 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900 text-sm rounded-lg">
           {state.error}
@@ -39,35 +39,57 @@ export default function OnboardingForm() {
 
       <form action={formAction} className="space-y-6">
         
-        {/* KROK 1: WIEK */}
+        {/* KROK 1: IMIĘ I WIEK */}
         <div className={step === 1 ? 'block' : 'hidden'}>
           <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50 tracking-tight mb-2">
             Witaj w Cel 75! 👋
           </h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6">
-            Zanim Twój osobisty Trener AI przygotuje plany i timing żywieniowy, musimy poznać Twoje parametry biologiczne. Ile masz lat?
+            Zanim Twój osobisty Trener AI przygotuje plany i timing żywieniowy, musimy poznać Twoje podstawowe dane.
           </p>
-          <div className="space-y-2">
-            <label htmlFor="age" className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-              Twój Wiek
-            </label>
-            <input
-              type="number"
-              id="age"
-              name="age"
-              required
-              min="13"
-              max="120"
-              placeholder="np. 34"
-              value={age}
-              onChange={(e) => setAge(e.target.value)}
-              className="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-850 rounded-xl text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-800 dark:focus:ring-zinc-300 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-            />
+          
+          <div className="space-y-4">
+            {/* Pole: Imię */}
+            <div className="space-y-2">
+              <label htmlFor="name" className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                Twoje Imię
+              </label>
+              <input
+                type="text"
+                id="name"
+                name="name"
+                required
+                maxLength={50}
+                placeholder="np. Tomek"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-850 rounded-xl text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-800 dark:focus:ring-zinc-300 transition-all"
+              />
+            </div>
+
+            {/* Pole: Wiek */}
+            <div className="space-y-2">
+              <label htmlFor="age" className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                Twój Wiek
+              </label>
+              <input
+                type="number"
+                id="age"
+                name="age"
+                required
+                min="13"
+                max="120"
+                placeholder="np. 34"
+                value={age}
+                onChange={(e) => setAge(e.target.value)}
+                className="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-850 rounded-xl text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-800 dark:focus:ring-zinc-300 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+            </div>
           </div>
           
           <button
             type="button"
-            disabled={!age || parseInt(age) < 13 || parseInt(age) > 120}
+            disabled={!name.trim() || name.trim().length < 2 || !age || parseInt(age) < 13 || parseInt(age) > 120}
             onClick={() => setStep(2)}
             className="w-full mt-8 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-medium py-3 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -84,7 +106,6 @@ export default function OnboardingForm() {
             Jaki jest Twój główny profil aktywności? AI dostosuje do niego ton wypowiedzi oraz kładziony nacisk treningowy.
           </p>
           
-          {/* Ukryty input, który wyśle wartość na serwer */}
           <input type="hidden" name="sport_profile" value={sportProfile} />
 
           <div className="grid grid-cols-1 gap-3">
@@ -136,7 +157,6 @@ export default function OnboardingForm() {
             Jakie zmiany w kompozycji ciała są Twoim priorytetem? AI odpowiednio dostosuje kaloryczność diety.
           </p>
 
-          {/* Ukryty input dla celu wagowego */}
           <input type="hidden" name="weight_goal" value={weightGoal} />
 
           <div className="grid grid-cols-1 gap-3">
