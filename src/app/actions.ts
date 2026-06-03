@@ -218,70 +218,85 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
       }
 
       // Precyzyjne instrukcje decyzyjne z wymogiem zwrotu formatu JSON
-      const dynamicSystemInstruction = `
-        ${persona}
-        Twój podopieczny to ${imie}, wiek: ${wiek} lat.
-        Poziom: ${poziom}. Cel wagowy: ${celWagowy}. Cele sportowe: ${celeSportowe}. Oczekiwania: ${oczekiwania}.
+// Precyzyjne instrukcje decyzyjne z kategorycznym wymogiem poprawności JSON-a
+const dynamicSystemInstruction = `
+${persona}
+Twój podopieczny to ${imie}, wiek: ${wiek} lat.
+Poziom: ${poziom}. Cel wagowy: ${celWagowy}. Cele sportowe: ${celeSportowe}. Oczekiwania: ${oczekiwania}.
 
-        === TWOJA ROLA JAKO DECYDENTA ===
-        Przeanalizuj stan biologiczny podopiecznego (HRV, Sen, Body Battery, jego notatki o samopoczuciu oraz ostatnie treningi). 
-        Musisz samodzielnie podjąć decyzję, czy dzisiaj zalecasz trening, czy dzień regeneracji (Rest Day).
-        
-        ZASADY FIZJOLOGICZNE:
-        1. Jeśli wskaźniki regeneracji są bardzo niskie (np. HRV znacznie poniżej normy, sen poniżej 55, Body Battery poniżej 40, lub użytkownik zgłasza ból, przeziębienie czy silne przemęczenie) -> BEZWZGLĘDNIE wyznacz DZIEŃ REGENERACJI (is_rest_day: true).
-        2. Jeśli wskaźniki są dobre -> Zaplanuj trening (is_rest_day: false). 
-           - Rodzaj treningu (workout_type): Dostosuj do głównej dyscypliny (${glownaDyscyplina}) lub zaproponuj domową Siłownię ('Siłownia') w oparciu o posiadany sprzęt (ławeczka, wolne ciężary, gumy), jeśli wymaga tego faza treningowa.
-           - Pora treningu (workout_time): Wybierz 'poranek', 'popoludnie' lub 'wieczor' na podstawie jego notatek (np. jeśli pisze, że może trenować tylko rano/wieczorem) lub zaleceń fizjologicznych.
+=== TWOJA ROLA JAKO DECYDENTA ===
+Przeanalizuj stan biologiczny podopiecznego (HRV, Sen, Body Battery, jego notatki o samopoczuciu oraz ostatnie treningi). 
+Musisz samodzielnie podjąć decyzję, czy dzisiaj zalecasz trening, czy dzień regeneracji (Rest Day).
 
-        3. PLAN REGENERACJI (Gdy is_rest_day to true):
-           - Napisz krótki tekst o regeneracji, ale jeśli to możliwe, dodaj zalecenia na bardzo lekkie ćwiczenia aktywacyjne/stabilizacyjne w domu (np. planki, mobilność, lekkie rozciąganie, ćwiczenia na gumach oporowych na ławce).
+ZASADY FIZJOLOGICZNE:
+1. Jeśli wskaźniki regeneracji są bardzo niskie (np. HRV znacznie poniżej normy, sen poniżej 55, Body Battery poniżej 40, lub użytkownik zgłasza ból, przeziębienie czy silne przemęczenie) -> BEZWZGLĘDNIE wyznacz DZIEŃ REGENERACJI (is_rest_day: true).
+2. Jeśli wskaźniki są dobre -> Zaplanuj trening (is_rest_day: false). 
+   - Rodzaj treningu (workout_type): Dostosuj do głównej dyscypliny (${glownaDyscyplina}) lub zaproponuj domową Siłownię ('Siłownia') w oparciu o posiadany sprzęt (ławeczka, wolne ciężary, gumy), jeśli wymaga tego faza treningowa.
+   - Pora treningu (workout_time): Wybierz 'poranek', 'popoludnie' lub 'wieczor' na podstawie jego notatek lub zaleceń fizjologicznych.
 
-        4. DIETA (Nutrient Timing):
-           - Zawsze rozpisz pełne menu na cały dzień z dostosowaniem makroskładników do pory treningu (wysokie węglowodany po treningu, lekkostrawne węglowodany przed rannym treningiem) lub zbilansowane, niskowęglowodanowe posiłki w przypadku Rest Day.
+3. PLAN REGENERACJI (Gdy is_rest_day to true):
+   - Napisz krótki tekst o regeneracji, ale jeśli to możliwe, dodaj zalecenia na bardzo lekkie ćwiczenia aktywacyjne/stabilizacyjne w domu (np. planki, mobilność, lekkie rozciąganie, ćwiczenia na gumach oporowych na ławce).
 
-        === WYMAGANY FORMAT ODPOWIEDZI (JSON) ===
-        Musisz zwrócić odpowiedź wyłącznie w formacie JSON o następującej strukturze pól:
-        {
-          "is_rest_day": true / false,
-          "workout_type": "Rower" | "Bieg" | "Siłownia" | "Brak",
-          "workout_time": "poranek" | "popoludnie" | "wieczor" | "none",
-          "ai_analiza": "Tutaj umieść całą swoją analizę poranną, plan treningowy lub regeneracyjny oraz protokół dietetyczny rozpisany w formacie Markdown (używaj #, ##, list, emotikonów)."
-        }
-      `;
+4. DIETA (Nutrient Timing):
+   - Zawsze rozpisz pełne menu na cały dzień z dostosowaniem makroskładników do pory treningu (wysokie węglowodany po treningu, lekkostrawne węglowodany przed rannym treningiem) lub zbilansowane, niskowęglowodanowe posiłki w przypadku Rest Day.
 
-      // Wywołanie Gemini API z wymuszeniem wyjścia JSON
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: dynamicSystemInstruction }] },
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
-            generationConfig: {
-              responseMimeType: "application/json"
-            }
-          })
-        }
-      );
+=== KATEGORYCZNE WYMAGANIA TECHNICZNE FORMATU JSON ===
+Zwróć odpowiedź WYŁĄCZNIE w formacie JSON o podanej niżej strukturze. 
+NIE dodawaj na początku ani na końcu odpowiedzi żadnych znaczników bloków kodu markdown typu \`\`\`json ani \`\`\`.
 
-      if (response.ok) {
-        const resData = await response.json() as any;
-        const rawJsonText = resData.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-        
-        try {
-          // Parsowanie bezpieczne
-          const decisionObj = JSON.parse(rawJsonText);
-          
-          is_rest_day = decisionObj.is_rest_day === true;
-          workout_type = decisionObj.workout_type || "Brak";
-          workout_time = decisionObj.workout_time || "none";
-          aiAnaliza = decisionObj.ai_analiza || "Błąd generowania analizy.";
-        } catch (jsonErr) {
-          console.error("Błąd parsowania decyzji JSON od Gemini:", jsonErr, rawJsonText);
-          aiAnaliza = "Nie udało się sparsować ustrukturyzowanej decyzji trenera AI. Trening domyślny.";
-        }
-      }
+BARDZO WAŻNE: Wartość pola "ai_analiza" musi być poprawnym ciągiem znaków JSON. 
+Każda nowa linia wewnątrz tekstu Markdown musi być bezwzględnie zapisana jako symbol "znaku ucieczki" \\n (dwuznak backslash i n), a nie jako fizyczne przejście do nowej linii w tekście odpowiedzi! Wszystkie cudzysłowy wewnątrz tekstu muszą być poprzedzone backslashem (\\").
+
+Struktura pól:
+{
+  "is_rest_day": true / false,
+  "workout_type": "Rower" | "Bieg" | "Siłownia" | "Brak",
+  "workout_time": "poranek" | "popoludnie" | "wieczor" | "none",
+  "ai_analiza": "Tutaj umieść całą swoją analizę poranną, plan treningowy lub regeneracyjny oraz protokół dietetyczny rozpisany w formacie Markdown."
+}
+`;
+
+// Wywołanie Gemini API z wymuszeniem wyjścia JSON
+const response = await fetch(
+`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+{
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    systemInstruction: { parts: [{ text: dynamicSystemInstruction }] },
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseMimeType: "application/json"
+    }
+  })
+}
+);
+
+if (response.ok) {
+const resData = await response.json() as any;
+const rawJsonText = resData.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+
+try {
+  // Oczyszczanie tekstu z ewentualnych bloków kodu markdown (np. ```json ... ```)
+  let cleanedJsonText = rawJsonText.trim();
+  if (cleanedJsonText.startsWith("```")) {
+    cleanedJsonText = cleanedJsonText.replace(/^```json\s*/i, "");
+    cleanedJsonText = cleanedJsonText.replace(/```$/, "");
+    cleanedJsonText = cleanedJsonText.trim();
+  }
+
+  // Parsowanie bezpieczne
+  const decisionObj = JSON.parse(cleanedJsonText);
+  
+  is_rest_day = decisionObj.is_rest_day === true;
+  workout_type = decisionObj.workout_type || "Brak";
+  workout_time = decisionObj.workout_time || "none";
+  aiAnaliza = decisionObj.ai_analiza || "Błąd generowania analizy.";
+} catch (jsonErr) {
+  console.error("Błąd parsowania decyzji JSON od Gemini:", jsonErr, rawJsonText);
+  aiAnaliza = `Nie udało się sparsować ustrukturyzowanej decyzji trenera AI.\n\nSurowa odpowiedź modelu:\n${rawJsonText}`;
+}
+}
     }
   } catch (err) {
     console.error("Błąd generowania analizy przez Gemini:", err);
