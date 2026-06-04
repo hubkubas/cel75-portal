@@ -27,11 +27,12 @@ export default async function Page() {
   }
 
   // 1. Pobieramy rozszerzone dane profilu (dodana kolumna onboarded, cel_wagowy, wiek)
-  const { data: profile } = await supabase
-    .from('profile')
-    .select('imie, glowna_dyscyplina, onboarded, cel_wagowy, wiek')
-    .eq('id', user.id)
-    .maybeSingle();
+// Pobieramy dane profilu do pełnej personalizacji interfejsu (UI)
+const { data: profile } = await supabase
+.from('profile')
+.select('*') // Bezpieczny select, który nie wywoła błędu przy brakujących kolumnach
+.eq('id', user.id)
+.maybeSingle();
 
   // 2. Warunek blokujący: Sprawdzamy, czy użytkownik musi przejść onboarding
   const needsOnboarding = !profile || !profile.onboarded;
