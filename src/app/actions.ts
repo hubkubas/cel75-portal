@@ -51,7 +51,7 @@ export async function saveOnboardingAction(
   prevState: OnboardingState | null,
   formData: FormData
 ): Promise<OnboardingState> {
-  const name = formData.get('name') as string; // <-- ODCZYT IMIENIA
+  const name = formData.get('name') as string;
   const ageStr = formData.get('age') as string;
   const sportProfile = formData.get('sport_profile') as string; // 'Rower' | 'Bieg' | 'Senior'
   const weightGoal = formData.get('weight_goal') as string; // 'Schudnąć' | 'Utrzymać' | 'Przytyć'
@@ -80,6 +80,13 @@ export async function saveOnboardingAction(
     return { error: 'Wybierz poprawny cel wagowy.' };
   }
 
+  // ==========================================
+  // DYNAMICZNE OBLICZANIE STREF FIZJOLOGICZNYCH
+  // ==========================================
+  const zone2Max = 180 - age; // Sufit Zone 2 wg metody Maffetone
+  const zone2Min = zone2Max - 10; // Podłoga Zone 2
+  const kadencjaTarget = sportProfile === 'Rower' ? 90 : sportProfile === 'Bieg' ? 175 : 100;
+
   try {
     const supabase = await createClient();
 
@@ -88,16 +95,23 @@ export async function saveOnboardingAction(
       return { error: 'Sesja wygasła. Zaloguj się ponownie.' };
     }
 
-    // Zapisujemy imię, wiek, dyscyplinę oraz cel do tabeli profile
     const { error } = await supabase
       .from('profile')
       .upsert({
         id: user.id,
-        imie: name.trim(), // <-- ZAPIS IMIENIA
+        imie: name.trim(),
         wiek: age,
         glowna_dyscyplina: sportProfile,
         cel_wagowy: weightGoal,
         onboarded: true,
+        // Zapisujemy wyliczone strefy i kadencję bezpośrednio do kolumny JSONB
+        strefy_tetna: {
+          zone2: {
+            min: zone2Min,
+            max: zone2Max
+          },
+          kadencja_target: kadencjaTarget
+        },
         updated_at: new Date().toISOString(),
       });
 
@@ -805,6 +819,13 @@ export async function updateProfileAction(
     return { error: 'Nieprawidłowy cel wagowy.' };
   }
 
+  // ==========================================
+  // DYNAMICZNE RE-OBLICZANIE STREF FIZJOLOGICZNYCH
+  // ==========================================
+  const zone2Max = 180 - age;
+  const zone2Min = zone2Max - 10;
+  const kadencjaTarget = sportProfile === 'Rower' ? 90 : sportProfile === 'Bieg' ? 175 : 100;
+
   try {
     const supabase = await createClient();
 
@@ -813,7 +834,6 @@ export async function updateProfileAction(
       return { error: 'Sesja wygasła. Zaloguj się ponownie.' };
     }
 
-    // Aktualizacja wiersza użytkownika w tabeli 'profile'
     const { error } = await supabase
       .from('profile')
       .update({
@@ -821,6 +841,14 @@ export async function updateProfileAction(
         wiek: age,
         glowna_dyscyplina: sportProfile,
         cel_wagowy: weightGoal,
+        // Nadpisujemy strefy nowymi wartościami w przypadku zmiany wieku lub dyscypliny
+        strefy_tetna: {
+          zone2: {
+            min: zone2Min,
+            max: zone2Max
+          },
+          kadencja_target: kadencjaTarget
+        },
         updated_at: new Date().toISOString(),
       })
       .eq('id', user.id);
