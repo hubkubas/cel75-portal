@@ -80,11 +80,14 @@ export async function saveOnboardingAction(
     return { error: 'Wybierz poprawny cel wagowy.' };
   }
 
+// ==========================================
+  // KLASYCZNE OBLICZANIE STREF NA BAZIE % HRMAX
   // ==========================================
-  // DYNAMICZNE OBLICZANIE STREF FIZJOLOGICZNYCH
-  // ==========================================
-  const zone2Max = 180 - age; // Sufit Zone 2 wg metody Maffetone
-  const zone2Min = zone2Max - 10; // Podłoga Zone 2
+  const hrMax = 220 - age; // Tętno maksymalne (220 - wiek)
+  const zone2Min = Math.round(hrMax * 0.60); // Dolna granica Zone 2 (60% HRmax)
+  const zone2Max = Math.round(hrMax * 0.70); // Górna granica Zone 2 (70% HRmax)
+  
+  // Docelowa kadencja
   const kadencjaTarget = sportProfile === 'Rower' ? 90 : sportProfile === 'Bieg' ? 175 : 100;
 
   try {
@@ -819,11 +822,14 @@ export async function updateProfileAction(
     return { error: 'Nieprawidłowy cel wagowy.' };
   }
 
+// ==========================================
+  // KLASYCZNE OBLICZANIE STREF NA BAZIE % HRMAX
   // ==========================================
-  // DYNAMICZNE RE-OBLICZANIE STREF FIZJOLOGICZNYCH
-  // ==========================================
-  const zone2Max = 180 - age;
-  const zone2Min = zone2Max - 10;
+  const hrMax = 220 - age; // Tętno maksymalne (220 - wiek)
+  const zone2Min = Math.round(hrMax * 0.60); // Dolna granica Zone 2 (60% HRmax)
+  const zone2Max = Math.round(hrMax * 0.70); // Górna granica Zone 2 (70% HRmax)
+  
+  // Docelowa kadencja
   const kadencjaTarget = sportProfile === 'Rower' ? 90 : sportProfile === 'Bieg' ? 175 : 100;
 
   try {
