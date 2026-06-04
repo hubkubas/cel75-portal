@@ -101,7 +101,8 @@ const { data: profile } = await supabase
               imie: profile?.imie || '',
               wiek: profile?.wiek || 30,
               glowna_dyscyplina: profile?.glowna_dyscyplina || 'Rower',
-              cel_wagowy: profile?.cel_wagowy || 'Utrzymać'
+              cel_wagowy: profile?.cel_wagowy || 'Utrzymać',
+              strefy_tetna: profile?.strefy_tetna
             }} 
           />
           <form action={logout}>

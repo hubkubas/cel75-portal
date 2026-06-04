@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useActionState, useEffect } from 'react';
-import { updateProfileAction, OnboardingState } from '@/app/actions'; // Dopasuj ścieżkę do actions.ts
+import { updateProfileAction, OnboardingState } from '@/app/actions';
 
 interface ProfileSettingsModalProps {
   initialData: {
@@ -9,6 +9,11 @@ interface ProfileSettingsModalProps {
     wiek: number;
     glowna_dyscyplina: string;
     cel_wagowy: string;
+    // Dodajemy typ stref tętna do właściwości komponentu
+    strefy_tetna?: {
+      zone2?: { min?: number; max?: number };
+      kadencja_target?: number;
+    };
   };
 }
 
@@ -21,21 +26,23 @@ export default function ProfileSettingsModal({ initialData }: ProfileSettingsMod
     null
   );
 
-  // Automatyczne zamykanie modala po pomyślnym zapisie danych
   useEffect(() => {
     if (state?.success) {
       setShowSuccess(true);
       const timer = setTimeout(() => {
         setShowSuccess(false);
-        setIsOpen(false); // Zamykamy okno
+        setIsOpen(false);
       }, 1500);
       return () => clearTimeout(timer);
     }
   }, [state]);
 
+  const z2Min = initialData.strefy_tetna?.zone2?.min ?? 105;
+  const z2Max = initialData.strefy_tetna?.zone2?.max ?? 115;
+  const kadencja = initialData.strefy_tetna?.kadencja_target ?? 90;
+
   return (
     <>
-      {/* Przycisk wyzwalający - Kółko zębate + Tekst "Ustawienia" */}
       <button
         type="button"
         onClick={() => setIsOpen(true)}
@@ -58,14 +65,10 @@ export default function ProfileSettingsModal({ initialData }: ProfileSettingsMod
         <span>Ustawienia</span>
       </button>
 
-      {/* Okno Modalne (Renderowane tylko gdy isOpen === true) */}
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm transition-all duration-200">
-          
-          {/* Karta Modala */}
           <div className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 text-slate-100">
             
-            {/* Przycisk zamknięcia (X) */}
             <button
               type="button"
               onClick={() => setIsOpen(false)}
@@ -76,7 +79,6 @@ export default function ProfileSettingsModal({ initialData }: ProfileSettingsMod
               </svg>
             </button>
 
-            {/* Nagłówek Modala */}
             <div className="mb-6">
               <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2">
                 ⚙️ Ustawienia Profilu i Celów
@@ -86,7 +88,6 @@ export default function ProfileSettingsModal({ initialData }: ProfileSettingsMod
               </p>
             </div>
 
-            {/* Formularz aktualizacji */}
             <form action={formAction} className="space-y-4">
               {state?.error && (
                 <div className="p-3 bg-red-950/30 text-red-400 border border-red-900/50 text-xs rounded-xl">
@@ -162,9 +163,26 @@ export default function ProfileSettingsModal({ initialData }: ProfileSettingsMod
                     <option value="Przytyć">💪 Budowa / Masa</option>
                   </select>
                 </div>
+
+                {/* KARTA PARAMETRÓW OBLICZONYCH PRZEZ AI */}
+                <div className="bg-slate-950/60 border border-slate-850/80 rounded-xl p-3.5 text-xs space-y-2.5">
+                  <div className="text-[10px] uppercase font-extrabold text-orange-500 tracking-wider flex items-center gap-1.5">
+                    ⚡ Strefy obliczone przez AI (na bazie wieku)
+                  </div>
+                  <div className="flex justify-between items-center text-slate-300">
+                    <span>Strefa tlenowa (Zone 2):</span>
+                    <strong className="text-slate-100 font-bold bg-slate-900 px-2 py-0.5 rounded border border-slate-800">{z2Min} - {z2Max} bpm</strong>
+                  </div>
+                  <div className="flex justify-between items-center text-slate-300">
+                    <span>Sugerowana kadencja:</span>
+                    <strong className="text-slate-100 font-bold bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                      {kadencja} {initialData.glowna_dyscyplina === 'Rower' ? 'RPM (korba)' : 'SPM (kroki)'}
+                    </strong>
+                  </div>
+                </div>
+
               </div>
 
-              {/* Dolne przyciski akcji modala */}
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-800/80">
                 <button
                   type="button"
