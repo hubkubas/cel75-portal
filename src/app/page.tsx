@@ -385,14 +385,16 @@ const { data: profile } = await supabase
           </section>
         )}
 
-        {/* 4. DZISIEJSZY WYGENEROWANY TRENING */}
-        {todayWorkout && (
+{/* 4. OSTATNI WYGENEROWANY TRENING */}
+{todayWorkout && (
           <section className="bg-slate-900 border border-orange-900/30 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+            {/* Dynamiczna etykieta z datą treningu */}
             <div className="absolute top-0 right-0 bg-orange-600/10 text-orange-400 text-[10px] uppercase font-extrabold px-3 py-1.5 rounded-bl-xl tracking-wider">
-              Odprawa dzisiejszego treningu
+              Trening z dnia {todayWorkout.data}
             </div>
+            
             <h2 className="text-lg font-bold text-orange-400 mb-4 flex items-center gap-2">
-              🏆 Analiza dzisiejszego treningu ({todayWorkout.rodzaj})
+              🏆 Analiza ostatniego treningu ({todayWorkout.rodzaj})
             </h2>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-slate-950 p-4 rounded-xl border border-slate-850 mb-6 text-xs">
@@ -412,7 +414,7 @@ const { data: profile } = await supabase
                 </div>
               </div>
             ) : (
-              <p className="text-xs text-slate-500 italic">Trener właśnie analizuje Twój dzisiejszy trening...</p>
+              <p className="text-xs text-slate-500 italic">Trener właśnie analizuje Twój trening...</p>
             )}
           </section>
         )}
