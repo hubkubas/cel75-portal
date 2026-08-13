@@ -17,6 +17,11 @@ export interface Message {
   obrazek_base64?: string | null;
 }
 
+export interface OnboardingState {
+  success?: boolean;
+  error?: string | null;
+}
+
 // ==========================================
 // FUNKCJE POMOCNICZE (BEZPIECZNE FORMATOWANIE DATY)
 // ==========================================
@@ -31,7 +36,7 @@ function getWarsawDateString(): string {
 }
 
 // ==========================================
-// I. AUTORYZACJA I PROFIL UŻYTKOWNIKA (SaaS)
+// I. AUTORYZACJA I ZARZĄDZANIE PROFILEM (ONBOARDING / USTAWIENIA)
 // ==========================================
 
 export async function logout(): Promise<void> {
@@ -39,6 +44,69 @@ export async function logout(): Promise<void> {
   await supabase.auth.signOut();
   revalidatePath('/', 'layout');
   redirect('/login');
+}
+
+export async function saveOnboardingAction(
+  prevState: any,
+  formData: FormData
+): Promise<OnboardingState> {
+  try {
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return { success: false, error: "Brak autoryzacji." };
+    }
+
+    const imie = (formData.get('imie') as string) || 'Zawodnik';
+    const wiek = parseInt(formData.get('wiek') as string, 10) || null;
+    const glowna_dyscyplina = (formData.get('glowna_dyscyplina') as string) || 'Rower';
+    const cel_wagowy = (formData.get('cel_wagowy') as string) || 'Utrzymanie wagi';
+    const poziom_zaawansowania = (formData.get('poziom_zaawansowania') as string) || 'Początkujący';
+    const cele_sportowe = (formData.get('cele_sportowe') as string) || 'Zdrowie i sprawność';
+    const oczekiwania_od_trenera = (formData.get('oczekiwania_od_trenera') as string) || 'Wsparcie i motywacja';
+    
+    const zone2_min = parseInt(formData.get('zone2_min') as string, 10) || 105;
+    const zone2_max = parseInt(formData.get('zone2_max') as string, 10) || 115;
+    const kadencja_target = parseInt(formData.get('kadencja_target') as string, 10) || 90;
+
+    const { error } = await supabase
+      .from('profile')
+      .upsert({
+        id: user.id,
+        imie,
+        wiek,
+        glowna_dyscyplina,
+        cel_wagowy,
+        poziom_zaawansowania,
+        cele_sportowe,
+        oczekiwania_od_trenera,
+        strefy_tetna: {
+          zone2: { min: zone2_min, max: zone2_max },
+          kadencja_target: kadencja_target
+        },
+        onboarding_completed: true,
+        updated_at: new Date().toISOString()
+      });
+
+    if (error) {
+      console.error("Błąd zapisu profilu (saveOnboardingAction):", error);
+      return { success: false, error: error.message };
+    }
+
+    revalidatePath('/', 'layout');
+    return { success: true, error: null };
+  } catch (err: any) {
+    console.error("Błąd saveOnboardingAction:", err);
+    return { success: false, error: err?.message || "Wystąpił nieoczekiwany błąd zapisu." };
+  }
+}
+
+export async function updateProfileAction(
+  prevState: any,
+  formData: FormData
+): Promise<OnboardingState> {
+  return saveOnboardingAction(prevState, formData);
 }
 
 // ==========================================
@@ -81,7 +149,6 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
 
   if (existing) return;
 
-  // Pobieranie danych z formularza
   const waga = parseFloat(formData.get('waga') as string) || 0;
   const hrv = parseInt(formData.get('hrv') as string, 10) || 0;
   const body_battery = parseInt(formData.get('body_battery') as string, 10) || 0;
@@ -448,7 +515,6 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
   const zone2 = profile?.strefy_tetna?.zone2 || { min: 105, max: 115 };
   const filozofia = profile?.filozofia_treningowa || 'Mitochondrialna baza (Zone 2)';
 
-  // POBIERANIE POGODY Z OPEN-METEO
   let temp = null;
   let windSpeed = null;
   let windDir = null;
