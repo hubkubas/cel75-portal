@@ -17,11 +17,6 @@ export interface Message {
   obrazek_base64?: string | null;
 }
 
-export type OnboardingState = {
-  success?: boolean;
-  error?: string;
-};
-
 // ==========================================
 // FUNKCJE POMOCNICZE (BEZPIECZNE FORMATOWANIE DATY)
 // ==========================================
@@ -44,92 +39,6 @@ export async function logout(): Promise<void> {
   await supabase.auth.signOut();
   revalidatePath('/', 'layout');
   redirect('/login');
-}
-
-// NOWA AKCJA: INTERAKTYWNY ONBOARDING
-export async function saveOnboardingAction(
-  prevState: OnboardingState | null,
-  formData: FormData
-): Promise<OnboardingState> {
-  const name = formData.get('name') as string;
-  const ageStr = formData.get('age') as string;
-  const sportProfile = formData.get('sport_profile') as string; // 'Rower' | 'Bieg' | 'Senior'
-  const weightGoal = formData.get('weight_goal') as string; // 'Schudnąć' | 'Utrzymać' | 'Przytyć'
-
-  const age = parseInt(ageStr, 10);
-
-  // 1. Walidacja imienia
-  if (!name || name.trim().length < 2 || name.trim().length > 50) {
-    return { error: 'Podaj poprawne imię (od 2 do 50 znaków).' };
-  }
-
-  // 2. Walidacja wieku
-  if (!age || isNaN(age) || age < 13 || age > 120) {
-    return { error: 'Podaj poprawny wiek (od 13 do 120 lat).' };
-  }
-
-  // 3. Walidacja profilu sportowego
-  const validProfiles = ['Rower', 'Bieg', 'Senior'];
-  if (!validProfiles.includes(sportProfile)) {
-    return { error: 'Wybierz jeden z dostępnych profili sportowych.' };
-  }
-
-  // 4. Walidacja celu wagowego
-  const validGoals = ['Schudnąć', 'Utrzymać', 'Przytyć'];
-  if (!validGoals.includes(weightGoal)) {
-    return { error: 'Wybierz poprawny cel wagowy.' };
-  }
-
-// ==========================================
-  // KLASYCZNE OBLICZANIE STREF NA BAZIE % HRMAX
-  // ==========================================
-  const hrMax = 220 - age; // Tętno maksymalne (220 - wiek)
-  const zone2Min = Math.round(hrMax * 0.60); // Dolna granica Zone 2 (60% HRmax)
-  const zone2Max = Math.round(hrMax * 0.70); // Górna granica Zone 2 (70% HRmax)
-  
-  // Docelowa kadencja
-  const kadencjaTarget = sportProfile === 'Rower' ? 90 : sportProfile === 'Bieg' ? 175 : 100;
-
-  try {
-    const supabase = await createClient();
-
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      return { error: 'Sesja wygasła. Zaloguj się ponownie.' };
-    }
-
-    const { error } = await supabase
-      .from('profile')
-      .upsert({
-        id: user.id,
-        imie: name.trim(),
-        wiek: age,
-        glowna_dyscyplina: sportProfile,
-        cel_wagowy: weightGoal,
-        onboarded: true,
-        // Zapisujemy wyliczone strefy i kadencję bezpośrednio do kolumny JSONB
-        strefy_tetna: {
-          zone2: {
-            min: zone2Min,
-            max: zone2Max
-          },
-          kadencja_target: kadencjaTarget
-        },
-        updated_at: new Date().toISOString(),
-      });
-
-    if (error) {
-      console.error('Błąd zapisu profilu:', error.message);
-      return { error: 'Nie udało się zapisać profilu. Spróbuj ponownie.' };
-    }
-
-    revalidatePath('/');
-    return { success: true };
-
-  } catch (err) {
-    console.error('Nieoczekiwany błąd w saveOnboardingAction:', err);
-    return { error: 'Wystąpił nieoczekiwany błąd serwera.' };
-  }
 }
 
 // ==========================================
@@ -172,75 +81,54 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
 
   if (existing) return;
 
-  // 1. Pobieranie danych wprowadzonych przez użytkownika
+  // Pobieranie danych z formularza
   const waga = parseFloat(formData.get('waga') as string) || 0;
   const hrv = parseInt(formData.get('hrv') as string, 10) || 0;
   const body_battery = parseInt(formData.get('body_battery') as string, 10) || 0;
   const jakosc_snu = parseInt(formData.get('jakosc_snu') as string, 10) || 0;
   const czas_na_trening = parseInt(formData.get('czas_na_trening') as string, 10) || 0;
-  const docelowy_dystans = parseFloat(formData.get('docelowy_dystans') as string) || 0;
-  const preferowana_pora = (formData.get('preferowana_pora') as string) || 'popoludnie'; // Opcjonalna preferowana pora
-  let notatkiRaw = (formData.get('notatki') as string) || '';
+  const notatki = (formData.get('notatki') as string) || '';
+  
+  const is_rest_day = formData.get('is_rest_day') === 'true';
+  const workout_type = (formData.get('workout_type') as string) || 'Rower';
+  const workout_time = (formData.get('workout_time') as string) || 'popoludnie';
 
-  // Archiwizacja celu dystansowego bezpośrednio w notatkach
-  const notatki = docelowy_dystans > 0 
-    ? `[Cel: ${docelowy_dystans} km] ${notatkiRaw}`.trim() 
-    : notatkiRaw;
-
-  // 2. Pobieranie profilu użytkownika
   const { data: profile } = await supabase.from('profile').select('*').eq('id', user.id).single();
 
   const imie = profile?.imie || 'zawodnik';
   const wiek = profile?.wiek || '';
   const zone2 = profile?.strefy_tetna?.zone2 || { min: 105, max: 115 };
+  const kadencja = profile?.strefy_tetna?.kadencja_target || 90;
   const glownaDyscyplina = profile?.glowna_dyscyplina || 'Rower';
   const celWagowy = profile?.cel_wagowy || 'Utrzymanie wagi';
   const poziom = profile?.poziom_zaawansowania || 'Początkujący';
   const oczekiwania = profile?.oczekiwania_od_trenera || 'Spokojne i wspierające doradztwo';
   const celeSportowe = profile?.cele_sportowe || 'Zdrowie i sprawność';
 
-  // 3. Pobranie historii ostatnich treningów
-  const { data: recentWorkouts } = await supabase
-    .from('treningi')
-    .select('data, rodzaj, dystans, czas_minuty, tetno_srednie')
-    .eq('user_id', user.id)
-    .order('data', { ascending: false })
-    .limit(3);
-
-  const workoutsHistoryString = recentWorkouts && recentWorkouts.length > 0
-    ? recentWorkouts.map(w => `- ${w.data}: ${w.rodzaj}, ${w.dystans ? w.dystans + 'km' : ''} ${w.czas_minuty}min, tętno śr: ${w.tetno_srednie || 'brak'} bpm`).join('\n')
-    : 'Brak wcześniejszych treningów w bazie.';
-
-  // Inicjalizacja domyślnych wartości
   let aiAnaliza = "";
-  let is_rest_day = false;
-  let workout_type = glownaDyscyplina;
-  let workout_time = "popoludnie";
-
   try {
     const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey) {
-      // Rozbudowanie promptu o preferowaną porę dnia
-      const prompt = `Przeanalizuj dzisiejszy poranek zawodnika o imieniu ${imie} i zaproponuj sugerowane zalecenia:
+    if (!apiKey) {
+      console.error("BŁĄD: Zmienna środowiskowa GEMINI_API_KEY jest pusta lub niezdefiniowana!");
+    } else {
+      const prompt = `Przeanalizuj dzisiejszy poranek zawodnika o imieniu ${imie}:
       Waga: ${waga} kg
       HRV: ${hrv} ms
       Body Battery: ${body_battery}
       Jakość snu: ${jakosc_snu}/100
-      Ograniczenie czasowe na dziś: ${czas_na_trening > 0 ? czas_na_trening + ' minut' : 'brak konkretnego limitu czasowego'}
-      Docelowy dystans zadeklarowany przez zawodnika: ${docelowy_dystans > 0 ? docelowy_dystans + ' km' : 'brak konkretnego celu dystansowego'}
-      Preferowana pora treningu określona przez zawodnika: ${preferowana_pora === 'poranek' ? 'Rano (przed 12:00)' : preferowana_pora === 'popoludnie' ? 'Popołudnie (12:00 - 17:00)' : 'Wieczór (po 17:00)'}
-      Notatki/Samopoczucie użytkownika: ${notatkiRaw || 'brak'}
-      
-      HISTORIA OSTATNICH TRENINGÓW:
-      ${workoutsHistoryString}`;
+      Dzień bez treningu (Rest Day): ${is_rest_day ? 'TAK' : 'NIE'}
+      Planowany rodzaj treningu: ${is_rest_day ? 'brak' : workout_type}
+      Planowana pora treningu: ${is_rest_day ? 'brak' : workout_time}
+      Czas na aktywność dzisiaj: ${czas_na_trening} minut
+      Notatki użytkownika: ${notatki || 'brak'}`;
 
       let persona = "";
       if (glownaDyscyplina === 'Rower') {
-        persona = `Jesteś wybitnym Trenerem Kolarskim, fizjologiem i ekspertem żywienia. Komunikuj się z pasją, kolarskim humorem (🚴‍♂️, 📻, 🚀). Fundamentem jest Strefa 2 (${zone2.min}-${zone2.max} bpm).`;
+        persona = `Jesteś wybitnym Trenerem Kolarskim, Dyrektorem Sportowym z Wozu Technicznego oraz ekspertem fizjologii dr. Iñigo San-Millána. Styl: pasja, kolarski humor (🚴‍♂️, 📻, 🚀), tętno Zone 2: ${zone2.min}-${zone2.max} bpm, kadencja: ${kadencja}+ RPM.`;
       } else if (glownaDyscyplina === 'Bieg') {
-        persona = `Jesteś profesjonalnym Trenerem Biegowym i biomechanikiem. Strefa regeneracyjna to ${zone2.min}-${zone2.max} bpm. Używaj emotikonów (🏃‍♂️, 👟, ⏱️).`;
+        persona = `Jesteś profesjonalnym Trenerem Biegowym i biomechanikiem. Dbaj o technikę, kadencję ~170-180 i stawy. Strefa tętna: ${zone2.min}-${zone2.max} bpm. Emotikony: 🏃‍♂️, 👟, ⏱️.`;
       } else {
-        persona = `Jesteś ciepłym Mentorem Zdrowotnym, ekspertem ds. longevity. Tętno podczas marszu: 90-105 bpm. Używaj wspierających emotikonów (🌳, 🚶‍♂️, ☀️).`;
+        persona = `Jesteś ciepłym Mentorem Zdrowotnym, ekspertem ds. longevity. Spacery, ćwiczenia równowagi, tętno 90-105 bpm. Emotikony: 🌳, 🚶‍♂️, ☀️.`;
       }
 
       const dynamicSystemInstruction = `
@@ -248,34 +136,26 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
         Twój podopieczny to ${imie}, wiek: ${wiek} lat.
         Poziom: ${poziom}. Cel wagowy: ${celWagowy}. Cele sportowe: ${celeSportowe}. Oczekiwania: ${oczekiwania}.
 
-        === TWOJA ROLA JAKO DORADCY ===
-        Przeanalizuj stan biologiczny podopiecznego (HRV, Sen, Body Battery, jego notatki o samopoczuciu oraz ostatnie treningi). 
-        Zasugeruj decyzję, czy dzisiaj zalecasz trening, czy dzień regeneracji (Rest Day).
-        
-        ZASADY FIZJOLOGICZNE:
-        1. Jeśli wskaźniki regeneracji są bardzo niskie (np. HRV znacznie poniżej normy, sen poniżej 55, Body Battery poniżej 40, lub użytkownik zgłasza ból, przeziębienie czy silne przemęczenie) -> Zasugeruj dzień regeneracji (is_rest_day: true).
-        2. Jeśli wskaźniki są dobre -> Zaproponuj trening (is_rest_day: false). 
-           - Rodzaj treningu (workout_type): Dostosuj do głównej dyscypliny (${glownaDyscyplina}) lub zaproponuj domową Siłownię ('Siłownia') w oparciu o posiadany sprzęt (ławeczka, wolne ciężary, gumy).
-           
-           === OBSŁUGA LIMITÓW, CELÓW I PORY DNIA ZAWODNIKA ===
-           - WARUNEK PORY DNIA: Jeśli planujesz trening, BEZWZGLĘDNIE zaplanuj go na preferowaną przez niego porę dnia (zwróć tę samą wartość w polu 'workout_time': 'poranek', 'popoludnie' lub 'wieczor').
-           - JEŚLI zadeklarował dystans (dystans > 0): Zaplanuj jednostkę pod ten dystans! Oblicz czas trwania i dostosuj dietę oraz timing posiłków pod taki wydatek energetyczny.
-           - JEŚLI nie podał dystansu, ale podał czas (czas > 0): Zaplanuj jednostkę mieszczącą się w tym limicie.
+        === KATEGORYCZNE ZASADY GENEROWANIA RAPORTU ===
 
-        3. PLAN REGENERACJI (Gdy is_rest_day to true):
-           - Napisz krótki tekst o regeneracji, ale jeśli to możliwe, dodaj zalecenia na bardzo lekkie ćwiczenia aktywacyjne/stabilizacyjne w domu (np. planki, mobilność, lekkie rozciąganie, ćwiczenia na gumach oporowych na ławce).
+        1. TRENING NA DZIŚ:
+        - Jeśli "Dzień bez treningu" = TAK: BEZWZGLĘDNIE ZABRANIAM generowania planu treningowego. Napisz tylko 1-2 zdania o regeneracji (np. spacer, rolowanie).
+        - Jeśli "Planowany rodzaj treningu" = Siłownia: Wygeneruj domowy plan siłowy wykorzystujący TYLKO: ławeczkę, wolne ciężary i gumy oporowe.
+        - Jeśli "Planowany rodzaj treningu" = Rower/Bieg: Wygeneruj plan na podany czas i intensywność.
 
-        4. DIETA (Nutrient Timing):
-           - Zawsze rozpisz pełne menu na cały dzień z dostosowaniem makroskładników do wybranej przez zawodnika pory treningu (wysokie węglowodany bezpośrednio po treningu, lekkostrawne węglowodany przed rannym treningiem) lub zbilansowane, niskowęglowodanowe posiłki w przypadku Rest Day.
+        2. DIETA (CAŁY DZIEŃ I NUTRIENT TIMING):
+        - ZAWSZE generuj pełne menu na CAŁY DZIEŃ z podziałem na posiłki.
+        - Dostosuj posiłki i makroskładniki bezpośrednio do pory treningu:
+          * Trening RANO: Śniadanie to lekkostrawne węglowodany przed wysiłkiem, obiad to potreningowa regeneracja (białko + węglowodany), kolacja lekka.
+          * Trening POPOŁUDNIU: Śniadanie białkowo-tłuszczowe, obiad przedtreningowy lekki, kolacja to potężny posiłek regeneracyjny po treningu.
+          * Trening WIECZOREM: Śniadanie i obiad zbilansowane, podwieczorek to węglowodany przed wyjściem, kolacja potreningowa nieobciążająca żołądka przed snem.
+          * Rest Day: Zbilansowane posiłki niskowęglowodanowe, regeneracyjne.
+        - Uwzględnij cel wagowy: ${celWagowy} (redukcja = mniejszy bilans, masa = większy bilans białkowo-węglowodanowy).
 
-        === WYMAGANY FORMAT ODPOWIEDZI (JSON) ===
-        Zwróć odpowiedź wyłącznie w formacie JSON o podanej niżej strukturze pól:
-        {
-          "is_rest_day": true / false,
-          "workout_type": "Rower" | "Bieg" | "Siłownia" | "Brak",
-          "workout_time": "poranek" | "popoludnie" | "wieczor" | "none",
-          "ai_analiza": "Tutaj umieść całą swoją analizę poranną, plan treningowy lub regeneracyjny oraz protokół dietetyczny rozpisany w formacie Markdown."
-        }
+        === WYMAGANA STRUKTURA ODPOWIEDZI (Markdown) ===
+        # 🎙️ Odprawa i analiza poranna
+        # ${is_rest_day ? '🧘‍♂️ Regeneracja (Dzień bez treningu)' : (workout_type === 'Siłownia' ? '🏋️‍♂️ Domowy Plan Siłowy' : '🚴‍♂️ Plan Treningowy')}
+        # 🥞 Protokół Dietetyczny (Cały Dzień)
       `;
 
       const response = await fetch(
@@ -285,84 +165,23 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: dynamicSystemInstruction }] },
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
-            generationConfig: {
-              responseMimeType: "application/json"
-            }
+            contents: [{ role: "user", parts: [{ text: prompt }] }]
           })
         }
       );
 
       if (response.ok) {
         const resData = await response.json() as any;
-        const rawJsonText = resData.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-        
-        let cleanedJsonText = rawJsonText.trim();
-        if (cleanedJsonText.startsWith("```")) {
-          cleanedJsonText = cleanedJsonText.replace(/^```json\s*/i, "");
-          cleanedJsonText = cleanedJsonText.replace(/```$/, "");
-          cleanedJsonText = cleanedJsonText.trim();
-        }
-
-        try {
-          const decisionObj = JSON.parse(cleanedJsonText);
-          
-          is_rest_day = decisionObj.is_rest_day === true;
-          workout_type = decisionObj.workout_type || "Brak";
-          workout_time = decisionObj.workout_time || "none";
-          aiAnaliza = decisionObj.ai_analiza || "Błąd generowania analizy.";
-        } catch (jsonErr) {
-          console.warn("Standardowe parsowanie JSON nie powiodło się, uruchamiam bezpieczny fallback parser:", jsonErr);
-          
-          const restDayMatch = cleanedJsonText.match(/"is_rest_day"\s*:\s*(true|false)/i);
-          if (restDayMatch) {
-            is_rest_day = restDayMatch[1].toLowerCase() === 'true';
-          }
-
-          const typeMatch = cleanedJsonText.match(/"workout_type"\s*:\s*"([^"]+)"/i);
-          if (typeMatch) {
-            workout_type = typeMatch[1];
-          }
-
-          const timeMatch = cleanedJsonText.match(/"workout_time"\s*:\s*"([^"]+)"/i);
-          if (timeMatch) {
-            workout_time = timeMatch[1];
-          }
-
-          const analizaIndex = cleanedJsonText.indexOf('"ai_analiza"');
-          if (analizaIndex !== -1) {
-            let tempText = cleanedJsonText.substring(analizaIndex);
-            const firstQuoteIndex = tempText.indexOf('"', tempText.indexOf(':'));
-            if (firstQuoteIndex !== -1) {
-              let contentText = tempText.substring(firstQuoteIndex + 1);
-              contentText = contentText.trim();
-              
-              if (contentText.endsWith('}')) {
-                contentText = contentText.substring(0, contentText.lastIndexOf('}')).trim();
-              }
-              if (contentText.endsWith('"')) {
-                contentText = contentText.substring(0, contentText.length - 1);
-              }
-
-              aiAnaliza = contentText
-                .replace(/\\n/g, '\n')
-                .replace(/\\"/g, '"')
-                .replace(/\\'/g, "'")
-                .trim();
-            }
-          }
-
-          if (!aiAnaliza) {
-            aiAnaliza = `Nie udało się sparsować decyzji trenera AI.\n\nSurowa odpowiedź modelu:\n${rawJsonText}`;
-          }
-        }
+        aiAnaliza = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      } else {
+        const errDetails = await response.text();
+        console.error(`Błąd Google API (${response.status}) w saveMorningReport:`, errDetails);
       }
     }
   } catch (err) {
     console.error("Błąd generowania analizy przez Gemini:", err);
   }
 
-  // Zapis do Supabase (wybrana pora dnia automatycznie zostanie zapisana w kolumnie workout_time)
   const { error: insertError } = await supabase
     .from('poranki')
     .insert([{
@@ -377,7 +196,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
       ai_analiza: aiAnaliza || null,
       is_rest_day,
       workout_type,
-      workout_time
+      workout_time: is_rest_day ? 'none' : workout_time
     }]);
 
   if (insertError) console.error("Błąd zapisu poranka w Supabase:", insertError);
@@ -592,10 +411,13 @@ export async function sendChatMessage(content: string, imageBase64?: string): Pr
         const resData = await response.json() as any;
         aiResponseText = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
       } else {
-        aiResponseText = "Przepraszam, mam chwilowy problem z bazą wiedzy.";
+        const errBody = await response.text();
+        console.error(`Błąd Google API (${response.status}) w czacie:`, errBody);
+        aiResponseText = `Błąd połączenia z Google AI (${response.status}): ${errBody}`;
       }
     } else {
-      aiResponseText = "Brak klucza API Gemini.";
+      console.error("BŁĄD: Zmienna środowiskowa GEMINI_API_KEY jest pusta!");
+      aiResponseText = "Brak skonfigurowanego klucza API Gemini.";
     }
 
     await supabase.from('czat_wiadomosci').insert([{ user_id: user.id, rola: 'model', tresc: aiResponseText }]);
@@ -607,7 +429,7 @@ export async function sendChatMessage(content: string, imageBase64?: string): Pr
 }
 
 // ==========================================
-// V. ANALIZA AKTYWNOŚCI I METRYK (STRAVA)
+// V. ANALIZA AKTYWNOŚCI I METRYK (STRAVA + OPEN-METEO)
 // ==========================================
 
 export async function sendWorkoutToAI(trainingId: number): Promise<{ success: boolean; error?: string }> {
@@ -626,14 +448,13 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
   const zone2 = profile?.strefy_tetna?.zone2 || { min: 105, max: 115 };
   const filozofia = profile?.filozofia_treningowa || 'Mitochondrialna baza (Zone 2)';
 
-  // ZMIENNE POGODOWE (DOMYŚLNE)
+  // POBIERANIE POGODY Z OPEN-METEO
   let temp = null;
   let windSpeed = null;
   let windDir = null;
   let rain = null;
   let weatherStringForAI = "Brak danych pogodowych.";
 
-  // POBIERANIE POGODY Z OPEN-METEO (Jeśli są współrzędne)
   if (workout.latitude && workout.longitude) {
     try {
       const dataTreningu = workout.data;
@@ -655,45 +476,49 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
         }
       }
     } catch (weatherErr) {
-      console.error("Błąd pobierania pogody:", weatherErr);
+      console.error("Błąd pobierania pogody z Open-Meteo:", weatherErr);
     }
   }
 
   let aiAnaliza = "";
   try {
     const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey) {
-      const prompt = `Przeanalizuj dzisiejszy trening (${workout.rodzaj}) zawodnika o imieniu ${imie}:
-      Dystans: ${workout.dystans} km, Czas: ${workout.czas_minuty} min, Tętno śr: ${workout.tetno_srednie} bpm, Kadencja: ${workout.kadencja_srednia} RPM.
-      WARUNKI ATMOSFERYCZNE: ${weatherStringForAI}
-      Oceń strefę 2 (${zone2.min}-${zone2.max} bpm) w odniesieniu do tych warunków.`;
+    if (!apiKey) {
+      console.error("BŁĄD: Zmienna środowiskowa GEMINI_API_KEY jest pusta!");
+      return { success: false, error: "Brak skonfigurowanego klucza API Gemini na serwerze." };
+    }
 
-      const dynamicSystemInstruction = `
-        Jesteś elitarnym Trenerem Osobistym i Fizjologiem Sportu. Podopieczny: ${imie}, wiek: ${wiek}, sport: ${glownaDyscyplina}. Filozofia: ${filozofia}.
-        Odpowiadaj profesjonalnie, motywująco, stosując kolarskie/biegowe pojęcia.
-        KATEGORYCZNY WYMÓG: Jeśli w warunkach atmosferycznych podano silny wiatr (np. powyżej 15 km/h) lub ekstremalną temperaturę (poniżej 5°C lub powyżej 28°C), uwzględnij ten wpływ na tętno i wysiłek zawodnika! Wyjaśnij mu, że walka z wiatrem czołowym podnosi tętno i jest to naturalna reakcja fizjologiczna.
-      `;
+    const prompt = `Przeanalizuj dzisiejszy trening (${workout.rodzaj}) zawodnika o imieniu ${imie}:
+    Dystans: ${workout.dystans} km, Czas: ${workout.czas_minuty} min, Tętno śr: ${workout.tetno_srednie} bpm, Kadencja: ${workout.kadencja_srednia} RPM.
+    WARUNKI ATMOSFERYCZNE: ${weatherStringForAI}
+    Oceń strefę 2 (${zone2.min}-${zone2.max} bpm) w odniesieniu do tych warunków.`;
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: dynamicSystemInstruction }] },
-          contents: [{ role: "user", parts: [{ text: prompt }] }]
-        })
-      });
+    const dynamicSystemInstruction = `
+      Jesteś elitarnym Trenerem Osobistym i Fizjologiem Sportu. Podopieczny: ${imie}, wiek: ${wiek}, sport: ${glownaDyscyplina}. Filozofia: ${filozofia}.
+      Odpowiadaj profesjonalnie, motywująco.
+      KATEGORYCZNY WYMÓG: Jeśli w warunkach atmosferycznych podano silny wiatr (np. powyżej 15 km/h) lub ekstremalną temperaturę, uwzględnij ten wpływ na tętno i wysiłek zawodnika!
+    `;
 
-      if (response.ok) {
-        const resData = await response.json() as any;
-        aiAnaliza = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      } else {
-        return { success: false, error: "AI odmówiło wygenerowania raportu." };
-      }
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: dynamicSystemInstruction }] },
+        contents: [{ role: "user", parts: [{ text: prompt }] }]
+      })
+    });
+
+    if (response.ok) {
+      const resData = await response.json() as any;
+      aiAnaliza = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
     } else {
-      return { success: false, error: "Brak skonfigurowanego klucza API Gemini." };
+      const errBody = await response.text();
+      console.error(`Błąd Google API (${response.status}) w sendWorkoutToAI:`, errBody);
+      return { success: false, error: `Błąd Google API (${response.status}): ${errBody}` };
     }
   } catch (err: any) {
-    return { success: false, error: err?.message || "Wystąpił nieoczekiwany błąd Gemini." };
+    console.error("Błąd zapytania fetch do Gemini:", err);
+    return { success: false, error: err?.message || "Wystąpił błąd połączenia z Gemini." };
   }
 
   if (!aiAnaliza || aiAnaliza.trim() === "") {
@@ -787,88 +612,4 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
 
 export async function analyzeTrainingAction(id: number): Promise<string> {
   return "Analiza wykonana pomyślnie.";
-}
-
-export async function updateProfileAction(
-  prevState: OnboardingState | null,
-  formData: FormData
-): Promise<OnboardingState> {
-  const name = formData.get('name') as string;
-  const ageStr = formData.get('age') as string;
-  const sportProfile = formData.get('sport_profile') as string;
-  const weightGoal = formData.get('weight_goal') as string;
-
-  const age = parseInt(ageStr, 10);
-
-  // 1. Walidacja imienia
-  if (!name || name.trim().length < 2 || name.trim().length > 50) {
-    return { error: 'Imię musi zawierać od 2 do 50 znaków.' };
-  }
-
-  // 2. Walidacja wieku
-  if (!age || isNaN(age) || age < 13 || age > 120) {
-    return { error: 'Podaj poprawny wiek (13-120 lat).' };
-  }
-
-  // 3. Walidacja profilu sportowego
-  const validProfiles = ['Rower', 'Bieg', 'Senior'];
-  if (!validProfiles.includes(sportProfile)) {
-    return { error: 'Nieprawidłowa główna dyscyplina.' };
-  }
-
-  // 4. Walidacja celu wagowego
-  const validGoals = ['Schudnąć', 'Utrzymać', 'Przytyć'];
-  if (!validGoals.includes(weightGoal)) {
-    return { error: 'Nieprawidłowy cel wagowy.' };
-  }
-
-// ==========================================
-  // KLASYCZNE OBLICZANIE STREF NA BAZIE % HRMAX
-  // ==========================================
-  const hrMax = 220 - age; // Tętno maksymalne (220 - wiek)
-  const zone2Min = Math.round(hrMax * 0.60); // Dolna granica Zone 2 (60% HRmax)
-  const zone2Max = Math.round(hrMax * 0.70); // Górna granica Zone 2 (70% HRmax)
-  
-  // Docelowa kadencja
-  const kadencjaTarget = sportProfile === 'Rower' ? 90 : sportProfile === 'Bieg' ? 175 : 100;
-
-  try {
-    const supabase = await createClient();
-
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      return { error: 'Sesja wygasła. Zaloguj się ponownie.' };
-    }
-
-    const { error } = await supabase
-      .from('profile')
-      .update({
-        imie: name.trim(),
-        wiek: age,
-        glowna_dyscyplina: sportProfile,
-        cel_wagowy: weightGoal,
-        // Nadpisujemy strefy nowymi wartościami w przypadku zmiany wieku lub dyscypliny
-        strefy_tetna: {
-          zone2: {
-            min: zone2Min,
-            max: zone2Max
-          },
-          kadencja_target: kadencjaTarget
-        },
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', user.id);
-
-    if (error) {
-      console.error('Błąd aktualizacji profilu:', error.message);
-      return { error: 'Wystąpił błąd podczas zapisywania zmian.' };
-    }
-
-    revalidatePath('/');
-    return { success: true };
-
-  } catch (err) {
-    console.error('Nieoczekiwany błąd w updateProfileAction:', err);
-    return { error: 'Wystąpił nieoczekiwany błąd serwera.' };
-  }
 }
