@@ -36,40 +36,30 @@ function getWarsawDateString(): string {
 }
 
 /**
- * Odporna funkcja dla DARMOWEGO TIERU Google AI Studio.
- * Wykorzystuje wyłącznie aktywne, bezpłatne modele Flash i Flash-Lite.
+ * PANCERNY I W 100% DARMOWY SILNIK AI
+ * Kolejność: Gemini 2.5 Flash -> Gemini 2.0 Flash -> Groq (Llama 3.3 70B - 100% Free)
  */
 async function callGeminiWithFallback(
   systemInstruction: string,
   promptText?: string,
   customContents?: any[]
 ): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("Brak skonfigurowanego klucza API Gemini na serwerze.");
-  }
+  const geminiKey = process.env.GEMINI_API_KEY;
+  const groqKey = process.env.GROQ_API_KEY;
 
-  // Wyłącznie aktywne i darmowe modele Google AI Studio (kolejność od najinteligentniejszego do najlżejszego)
-  const modelsToTry = [
-    'gemini-2.5-flash',
-    'gemini-2.5-flash-lite',
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-lite'
-  ];
+  // 1. NAJPIERW PRÓBUJEMY DARMOWEGO GEMINI
+  if (geminiKey) {
+    const geminiModels = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+    const contents = customContents || [{ role: "user", parts: [{ text: promptText || "" }] }];
+    const requestBody = {
+      systemInstruction: { parts: [{ text: systemInstruction }] },
+      contents
+    };
 
-  const contents = customContents || [{ role: "user", parts: [{ text: promptText || "" }] }];
-  const requestBody = {
-    systemInstruction: { parts: [{ text: systemInstruction }] },
-    contents
-  };
-
-  let lastErrorText = "";
-
-  for (const model of modelsToTry) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (const model of geminiModels) {
       try {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -77,34 +67,69 @@ async function callGeminiWithFallback(
           }
         );
 
-        if (response.ok) {
-          const resData = await response.json() as any;
-          const text = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        if (res.ok) {
+          const data = await res.json() as any;
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
           if (text && text.trim() !== "") {
             return text;
           }
         }
-
-        const errBody = await response.text();
-        lastErrorText = `[${model}] Status ${response.status}: ${errBody}`;
-
-        // Jeśli model nie istnieje (404), przejdź natychmiast do następnego
-        if (response.status === 404) {
-          break;
-        }
-
-        // Limit zapytań (429) lub przeciążenie (503) w darmowym API -> poczekaj chwilę
-        if (response.status === 429 || response.status === 503) {
-          console.warn(`[Gemini Free Tier] ${model} osiągnął limit (status ${response.status}). Próba ${attempt}/2...`);
-          await new Promise(r => setTimeout(r, 1200 * attempt));
-        }
-      } catch (fetchErr: any) {
-        lastErrorText = fetchErr?.message || "Błąd połączenia";
+      } catch (e) {
+        console.warn(`[Gemini Free] Błąd z modelem ${model}, sprawdzam kolejne opcje...`);
       }
     }
   }
 
-  throw new Error(`Darmowe API Gemini jest chwilowo przeciążone (limit na minutę). Odczekaj kilkanaście sekund i spróbuj ponownie.`);
+  // 2. JEŚLI GEMINI JEST ZAJĘTE/PRZECIĄŻONE -> RATUJE NAS DARMOWY GROQ (Llama 3.3 70B)
+  if (groqKey) {
+    try {
+      console.log("[AI Fallback] Przełączam na darmowy silnik Groq (Llama 3.3 70B)...");
+
+      // Konwersja historii wiadomości na format OpenAI/Groq
+      let messages: any[] = [{ role: "system", content: systemInstruction }];
+
+      if (customContents && customContents.length > 0) {
+        for (const item of customContents) {
+          const role = item.role === 'model' ? 'assistant' : 'user';
+          const textPart = item.parts?.map((p: any) => p.text || '').join('\n') || '';
+          if (textPart.trim()) {
+            messages.push({ role, content: textPart });
+          }
+        }
+      } else if (promptText) {
+        messages.push({ role: "user", content: promptText });
+      }
+
+      const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${groqKey}`
+        },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          messages: messages,
+          temperature: 0.7,
+          max_tokens: 1500
+        })
+      });
+
+      if (groqRes.ok) {
+        const groqData = await groqRes.json() as any;
+        const text = groqData.choices?.[0]?.message?.content;
+        if (text && text.trim() !== "") {
+          return text;
+        }
+      } else {
+        const groqErr = await groqRes.text();
+        console.error("[Groq Error]", groqErr);
+      }
+    } catch (groqErr) {
+      console.error("[Groq Exception]", groqErr);
+    }
+  }
+
+  throw new Error("Wszystkie darmowe serwery AI (Gemini i Groq) są chwilowo niedostępne. Spróbuj za chwilę.");
 }
 
 // ==========================================
