@@ -23,7 +23,7 @@ export interface OnboardingState {
 }
 
 // ==========================================
-// FUNKCJE POMOCNICZE (BEZPIECZNE FORMATOWANIE DATY)
+// FUNKCJE POMOCNICZE I ODPORNOŚĆ AI (SMART FALLBACK)
 // ==========================================
 
 function getWarsawDateString(): string {
@@ -33,6 +33,68 @@ function getWarsawDateString(): string {
   const mm = String(warsawDate.getMonth() + 1).padStart(2, '0');
   const dd = String(warsawDate.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
+}
+
+/**
+ * Inteligentna funkcja odpytująca Gemini z automatycznym mechanizmem Fallback (przełączaniem na modele zapasowe przy 503 / przeciążeniu)
+ */
+async function callGeminiWithFallback(
+  systemInstruction: string,
+  promptText?: string,
+  customContents?: any[]
+): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Brak skonfigurowanego klucza API Gemini na serwerze.");
+  }
+
+  // Lista modeli odpytywanych kolejno w przypadku błędu 503 (przeciążenie) lub 429
+  const modelsToTry = [
+    'gemini-3.5-flash',
+    'gemini-2.0-flash',
+    'gemini-2.5-pro',
+    'gemini-1.5-pro'
+  ];
+
+  const contents = customContents || [{ role: "user", parts: [{ text: promptText || "" }] }];
+  const requestBody = {
+    systemInstruction: { parts: [{ text: systemInstruction }] },
+    contents
+  };
+
+  let lastErrorText = "";
+
+  for (const model of modelsToTry) {
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody)
+        }
+      );
+
+      if (response.ok) {
+        const resData = await response.json() as any;
+        const text = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        if (text.trim() !== "") {
+          return text; // Sukces! Zwracamy wygenerowany tekst
+        }
+      }
+
+      const errBody = await response.text();
+      lastErrorText = `[${model}] Status ${response.status}: ${errBody}`;
+      console.warn(`[Gemini Fallback] Model ${model} niedostępny (${response.status}). Przełączam na model zapasowy...`);
+      
+      // Krótka pauza 300ms przed kolejną próbą
+      await new Promise(r => setTimeout(r, 300));
+    } catch (fetchErr: any) {
+      lastErrorText = fetchErr?.message || "Błąd sieci";
+    }
+  }
+
+  throw new Error(`Wszystkie modele AI są chwilowo zajęte. ${lastErrorText}`);
 }
 
 // ==========================================
@@ -174,79 +236,57 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
 
   let aiAnaliza = "";
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error("BŁĄD: Zmienna środowiskowa GEMINI_API_KEY jest pusta!");
+    const prompt = `Przeanalizuj dzisiejszy poranek zawodnika o imieniu ${imie}:
+    Waga: ${waga} kg
+    HRV: ${hrv} ms
+    Body Battery: ${body_battery}
+    Jakość snu: ${jakosc_snu}/100
+    Dzień bez treningu (Rest Day): ${is_rest_day ? 'TAK' : 'NIE'}
+    Planowany rodzaj treningu: ${is_rest_day ? 'brak' : workout_type}
+    Planowana pora treningu: ${is_rest_day ? 'brak' : workout_time}
+    Czas na aktywność dzisiaj: ${czas_na_trening} minut
+    Notatki użytkownika: ${notatki || 'brak'}`;
+
+    let persona = "";
+    if (glownaDyscyplina === 'Rower') {
+      persona = `Jesteś wybitnym Trenerem Kolarskim, Dyrektorem Sportowym z Wozu Technicznego oraz ekspertem fizjologii dr. Iñigo San-Millána. Styl: pasja, kolarski humor (🚴‍♂️, 📻, 🚀), tętno Zone 2: ${zone2.min}-${zone2.max} bpm, kadencja: ${kadencja}+ RPM.`;
+    } else if (glownaDyscyplina === 'Bieg') {
+      persona = `Jesteś profesjonalnym Trenerem Biegowym i biomechanikiem. Dbaj o technikę, kadencję ~170-180 i stawy. Strefa tętna: ${zone2.min}-${zone2.max} bpm. Emotikony: 🏃‍♂️, 👟, ⏱️.`;
     } else {
-      const prompt = `Przeanalizuj dzisiejszy poranek zawodnika o imieniu ${imie}:
-      Waga: ${waga} kg
-      HRV: ${hrv} ms
-      Body Battery: ${body_battery}
-      Jakość snu: ${jakosc_snu}/100
-      Dzień bez treningu (Rest Day): ${is_rest_day ? 'TAK' : 'NIE'}
-      Planowany rodzaj treningu: ${is_rest_day ? 'brak' : workout_type}
-      Planowana pora treningu: ${is_rest_day ? 'brak' : workout_time}
-      Czas na aktywność dzisiaj: ${czas_na_trening} minut
-      Notatki użytkownika: ${notatki || 'brak'}`;
-
-      let persona = "";
-      if (glownaDyscyplina === 'Rower') {
-        persona = `Jesteś wybitnym Trenerem Kolarskim, Dyrektorem Sportowym z Wozu Technicznego oraz ekspertem fizjologii dr. Iñigo San-Millána. Styl: pasja, kolarski humor (🚴‍♂️, 📻, 🚀), tętno Zone 2: ${zone2.min}-${zone2.max} bpm, kadencja: ${kadencja}+ RPM.`;
-      } else if (glownaDyscyplina === 'Bieg') {
-        persona = `Jesteś profesjonalnym Trenerem Biegowym i biomechanikiem. Dbaj o technikę, kadencję ~170-180 i stawy. Strefa tętna: ${zone2.min}-${zone2.max} bpm. Emotikony: 🏃‍♂️, 👟, ⏱️.`;
-      } else {
-        persona = `Jesteś ciepłym Mentorem Zdrowotnym, ekspertem ds. longevity. Spacery, ćwiczenia równowagi, tętno 90-105 bpm. Emotikony: 🌳, 🚶‍♂️, ☀️.`;
-      }
-
-      const dynamicSystemInstruction = `
-        ${persona}
-        Twój podopieczny to ${imie}, wiek: ${wiek} lat.
-        Poziom: ${poziom}. Cel wagowy: ${celWagowy}. Cele sportowe: ${celeSportowe}. Oczekiwania: ${oczekiwania}.
-
-        === KATEGORYCZNE ZASADY GENEROWANIA RAPORTU ===
-
-        1. TRENING NA DZIŚ:
-        - Jeśli "Dzień bez treningu" = TAK: BEZWZGLĘDNIE ZABRANIAM generowania planu treningowego. Napisz tylko 1-2 zdania o regeneracji (np. spacer, rolowanie).
-        - Jeśli "Planowany rodzaj treningu" = Siłownia: Wygeneruj domowy plan siłowy wykorzystujący TYLKO: ławeczkę, wolne ciężary i gumy oporowe.
-        - Jeśli "Planowany rodzaj treningu" = Rower/Bieg: Wygeneruj plan na podany czas i intensywność.
-
-        2. DIETA (CAŁY DZIEŃ I NUTRIENT TIMING):
-        - ZAWSZE generuj pełne menu na CAŁY DZIEŃ z podziałem na posiłki.
-        - Dostosuj posiłki i makroskładniki bezpośrednio do pory treningu:
-          * Trening RANO: Śniadanie to lekkostrawne węglowodany przed wysiłkiem, obiad to potreningowa regeneracja (białko + węglowodany), kolacja lekka.
-          * Trening POPOŁUDNIU: Śniadanie białkowo-tłuszczowe, obiad przedtreningowy lekki, kolacja to potężny posiłek regeneracyjny po treningu.
-          * Trening WIECZOREM: Śniadanie i obiad zbilansowane, podwieczorek to węglowodany przed wyjściem, kolacja potreningowa nieobciążająca żołądka przed snem.
-          * Rest Day: Zbilansowane posiłki niskowęglowodanowe, regeneracyjne.
-        - Uwzględnij cel wagowy: ${celWagowy} (redukcja = mniejszy bilans, masa = większy bilans białkowo-węglowodanowy).
-
-        === WYMAGANA STRUKTURA ODPOWIEDZI (Markdown) ===
-        # 🎙️ Odprawa i analiza poranna
-        # ${is_rest_day ? '🧘‍♂️ Regeneracja (Dzień bez treningu)' : (workout_type === 'Siłownia' ? '🏋️‍♂️ Domowy Plan Siłowy' : '🚴‍♂️ Plan Treningowy')}
-        # 🥞 Protokół Dietetyczny (Cały Dzień)
-      `;
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: dynamicSystemInstruction }] },
-            contents: [{ role: "user", parts: [{ text: prompt }] }]
-          })
-        }
-      );
-
-      if (response.ok) {
-        const resData = await response.json() as any;
-        aiAnaliza = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      } else {
-        const errDetails = await response.text();
-        console.error(`Błąd Google API (${response.status}) w saveMorningReport:`, errDetails);
-      }
+      persona = `Jesteś ciepłym Mentorem Zdrowotnym, ekspertem ds. longevity. Spacery, ćwiczenia równowagi, tętno 90-105 bpm. Emotikony: 🌳, 🚶‍♂️, ☀️.`;
     }
-  } catch (err) {
-    console.error("Błąd generowania analizy przez Gemini:", err);
+
+    const dynamicSystemInstruction = `
+      ${persona}
+      Twój podopieczny to ${imie}, wiek: ${wiek} lat.
+      Poziom: ${poziom}. Cel wagowy: ${celWagowy}. Cele sportowe: ${celeSportowe}. Oczekiwania: ${oczekiwania}.
+
+      === KATEGORYCZNE ZASADY GENEROWANIA RAPORTU ===
+
+      1. TRENING NA DZIŚ:
+      - Jeśli "Dzień bez treningu" = TAK: BEZWZGLĘDNIE ZABRANIAM generowania planu treningowego. Napisz tylko 1-2 zdania o regeneracji (np. spacer, rolowanie).
+      - Jeśli "Planowany rodzaj treningu" = Siłownia: Wygeneruj domowy plan siłowy wykorzystujący TYLKO: ławeczkę, wolne ciężary i gumy oporowe.
+      - Jeśli "Planowany rodzaj treningu" = Rower/Bieg: Wygeneruj plan na podany czas i intensywność.
+
+      2. DIETA (CAŁY DZIEŃ I NUTRIENT TIMING):
+      - ZAWSZE generuj pełne menu na CAŁY DZIEŃ z podziałem na posiłki.
+      - Dostosuj posiłki i makroskładniki bezpośrednio do pory treningu:
+        * Trening RANO: Śniadanie to lekkostrawne węglowodany przed wysiłkiem, obiad to potreningowa regeneracja (białko + węglowodany), kolacja lekka.
+        * Trening POPOŁUDNIU: Śniadanie białkowo-tłuszczowe, obiad przedtreningowy lekki, kolacja to potężny posiłek regeneracyjny po treningu.
+        * Trening WIECZOREM: Śniadanie i obiad zbilansowane, podwieczorek to węglowodany przed wyjściem, kolacja potreningowa nieobciążająca żołądka przed snem.
+        * Rest Day: Zbilansowane posiłki niskowęglowodanowe, regeneracyjne.
+      - Uwzględnij cel wagowy: ${celWagowy} (redukcja = mniejszy bilans, masa = większy bilans białkowo-węglowodanowy).
+
+      === WYMAGANA STRUKTURA ODPOWIEDZI (Markdown) ===
+      # 🎙️ Odprawa i analiza poranna
+      # ${is_rest_day ? '🧘‍♂️ Regeneracja (Dzień bez treningu)' : (workout_type === 'Siłownia' ? '🏋️‍♂️ Domowy Plan Siłowy' : '🚴‍♂️ Plan Treningowy')}
+      # 🥞 Protokół Dietetyczny (Cały Dzień)
+    `;
+
+    // Wywołanie z mechanizmem zapasowym
+    aiAnaliza = await callGeminiWithFallback(dynamicSystemInstruction, prompt);
+  } catch (err: any) {
+    console.error("Błąd generowania analizy poranka:", err?.message || err);
   }
 
   const { error: insertError } = await supabase
@@ -466,25 +506,11 @@ export async function sendChatMessage(content: string, imageBase64?: string): Pr
     });
 
     let aiResponseText = "";
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (apiKey) {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ systemInstruction: { parts: [{ text: dynamicChatInstruction }] }, contents })
-      });
-
-      if (response.ok) {
-        const resData = await response.json() as any;
-        aiResponseText = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      } else {
-        const errBody = await response.text();
-        console.error(`Błąd Google API (${response.status}) w czacie:`, errBody);
-        aiResponseText = `Błąd połączenia z Google AI (${response.status}): ${errBody}`;
-      }
-    } else {
-      console.error("BŁĄD: Zmienna środowiskowa GEMINI_API_KEY jest pusta!");
-      aiResponseText = "Brak skonfigurowanego klucza API Gemini.";
+    try {
+      // Wywołanie odporne na błędy 503/429
+      aiResponseText = await callGeminiWithFallback(dynamicChatInstruction, undefined, contents);
+    } catch (aiErr: any) {
+      aiResponseText = `Przepraszam, serwery AI mają chwilowe przeciążenie: ${aiErr.message}`;
     }
 
     await supabase.from('czat_wiadomosci').insert([{ user_id: user.id, rola: 'model', tresc: aiResponseText }]);
@@ -548,12 +574,6 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
 
   let aiAnaliza = "";
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error("BŁĄD: Zmienna środowiskowa GEMINI_API_KEY jest pusta!");
-      return { success: false, error: "Brak skonfigurowanego klucza API Gemini na serwerze." };
-    }
-
     const prompt = `Przeanalizuj dzisiejszy trening (${workout.rodzaj}) zawodnika o imieniu ${imie}:
     Dystans: ${workout.dystans} km, Czas: ${workout.czas_minuty} min, Tętno śr: ${workout.tetno_srednie} bpm, Kadencja: ${workout.kadencja_srednia} RPM.
     WARUNKI ATMOSFERYCZNE: ${weatherStringForAI}
@@ -565,26 +585,11 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
       KATEGORYCZNY WYMÓG: Jeśli w warunkach atmosferycznych podano silny wiatr (np. powyżej 15 km/h) lub ekstremalną temperaturę, uwzględnij ten wpływ na tętno i wysiłek zawodnika!
     `;
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: dynamicSystemInstruction }] },
-        contents: [{ role: "user", parts: [{ text: prompt }] }]
-      })
-    });
-
-    if (response.ok) {
-      const resData = await response.json() as any;
-      aiAnaliza = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    } else {
-      const errBody = await response.text();
-      console.error(`Błąd Google API (${response.status}) w sendWorkoutToAI:`, errBody);
-      return { success: false, error: `Błąd Google API (${response.status}): ${errBody}` };
-    }
+    // Wywołanie odporne na przeciążenia 503
+    aiAnaliza = await callGeminiWithFallback(dynamicSystemInstruction, prompt);
   } catch (err: any) {
-    console.error("Błąd zapytania fetch do Gemini:", err);
-    return { success: false, error: err?.message || "Wystąpił błąd połączenia z Gemini." };
+    console.error("Błąd analizy treningu:", err);
+    return { success: false, error: err?.message || "Wystąpił błąd generowania analizy." };
   }
 
   if (!aiAnaliza || aiAnaliza.trim() === "") {
