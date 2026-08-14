@@ -6,11 +6,20 @@ import { analyzeTrainingAction } from '../app/actions';
 export default function TrainingCard({ training }: { training: any }) {
   const [analysis, setAnalysis] = useState("");
   const [loading, setLoading] = useState(false);
+  const [userComment, setUserComment] = useState("");
+
+  const quickNotes = [
+    "🚴‍♂️ Jazda rekreacyjna / z rodziną (kawa & lody)",
+    "⛰️ Wspinaczka górska / wjazd (max wysiłek)",
+    "⚡ Ustawka / wyścig / ostra jazda",
+    "🌧️ Złe warunki / walka z wiatrem"
+  ];
 
   const handleAnalyze = async () => {
     setLoading(true);
     try {
-      const result = await analyzeTrainingAction(training);
+      // Przekazujemy dane treningu ORAZ opcjonalny komentarz zawodnika
+      const result = await analyzeTrainingAction(training, userComment);
       setAnalysis(result);
     } catch (error) {
       console.error("Błąd podczas analizy treningu:", error);
@@ -20,25 +29,62 @@ export default function TrainingCard({ training }: { training: any }) {
   };
 
   return (
-    <div className="bg-gray-900 p-6 rounded-xl border border-gray-800 shadow-sm">
-      <h2 className="text-xl font-bold text-white">{training["Nazwa Treningu"]}</h2>
-      <p className="text-gray-400 text-sm mb-4">{training["Data"]}</p>
-      <div className="text-sm text-gray-300 mb-4">
-        Dystans: <span className="font-semibold text-white">{training["Dystans"]}</span> | Kalorie: <span className="font-semibold text-white">{training["Kalorie"]}</span>
+    <div className="bg-gray-900 p-6 rounded-xl border border-gray-800 shadow-sm space-y-4">
+      {/* Nagłówek treningu */}
+      <div>
+        <h2 className="text-xl font-bold text-white">{training["Nazwa Treningu"]}</h2>
+        <p className="text-gray-400 text-sm">{training["Data"]}</p>
+        <div className="text-sm text-gray-300 mt-1">
+          Dystans: <span className="font-semibold text-white">{training["Dystans"]}</span> | Kalorie: <span className="font-semibold text-white">{training["Kalorie"]}</span>
+        </div>
+      </div>
+
+      {/* Sekcja komentarza / kontekstu dla trenera */}
+      <div className="bg-gray-800/50 p-3 rounded-lg border border-gray-700/60">
+        <label className="block text-xs font-medium text-gray-300 mb-1.5">
+          💬 Dodaj kontekst dla trenera (opcjonalnie):
+        </label>
+        
+        {/* Szybkie tagi do kliknięcia */}
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {quickNotes.map((note) => (
+            <button
+              key={note}
+              type="button"
+              onClick={() => setUserComment(note)}
+              className={`text-xs px-2.5 py-1 rounded-full border transition ${
+                userComment === note
+                  ? "bg-amber-500/20 border-amber-400 text-amber-300 font-medium"
+                  : "bg-gray-800 border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-600"
+              }`}
+            >
+              {note}
+            </button>
+          ))}
+        </div>
+
+        {/* Pole tekstowe na własną uwagę */}
+        <input
+          type="text"
+          value={userComment}
+          onChange={(e) => setUserComment(e.target.value)}
+          placeholder="np. Jechałem z rodziną / Zoncolan na 100% / bolała noga..."
+          className="w-full bg-gray-950 border border-gray-700 rounded-md px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition"
+        />
       </div>
       
+      {/* Przycisk wysyłki do AI */}
       <button 
         onClick={handleAnalyze}
         disabled={loading}
-        className={`px-4 py-2 rounded text-sm font-medium transition flex items-center justify-center gap-2 ${
+        className={`w-full py-2.5 px-4 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2 ${
           loading 
             ? "bg-blue-600/40 text-blue-200 border border-blue-500/30 cursor-not-allowed animate-pulse" 
-            : "bg-blue-600 hover:bg-blue-500 text-white cursor-pointer active:scale-95"
+            : "bg-blue-600 hover:bg-blue-500 text-white cursor-pointer active:scale-95 shadow-md shadow-blue-900/20"
         }`}
       >
         {loading ? (
           <>
-            {/* Animowane kółko ładowania (spinner) */}
             <svg 
               className="animate-spin h-4 w-4 text-blue-300" 
               xmlns="http://www.w3.org/2000/svg" 
@@ -48,7 +94,7 @@ export default function TrainingCard({ training }: { training: any }) {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
             </svg>
-            <span>Trwa analiza trenera AI...</span>
+            <span>Trener analizuje dane i Twój komentarz...</span>
           </>
         ) : (
           <>
@@ -58,6 +104,7 @@ export default function TrainingCard({ training }: { training: any }) {
         )}
       </button>
 
+      {/* Odpowiedź trenera AI */}
       {analysis && (
         <div className="mt-4 p-4 bg-blue-950/30 border border-blue-800/60 rounded-lg text-blue-200 text-sm leading-relaxed whitespace-pre-wrap">
           {analysis}

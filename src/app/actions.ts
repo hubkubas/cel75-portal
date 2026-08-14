@@ -36,7 +36,7 @@ function getWarsawDateString(): string {
 }
 
 /**
- * Inteligentna funkcja odpytująca Gemini z automatycznym mechanizmem Fallback (przełączaniem na modele zapasowe przy 503 / przeciążeniu)
+ * Inteligentna funkcja odpytująca Gemini z automatycznym mechanizmem Fallback (przełączaniem na modele zapasowe przy 503 / 429 / 404)
  */
 async function callGeminiWithFallback(
   systemInstruction: string,
@@ -48,13 +48,12 @@ async function callGeminiWithFallback(
     throw new Error("Brak skonfigurowanego klucza API Gemini na serwerze.");
   }
 
-  // Lista wyłącznie aktywnych i aktualnych modeli Gemini
+  // Lista modeli Gemini z fallbackiem
   const modelsToTry = [
-    'gemini-3.6-flash',
-    'gemini-3.5-flash',
-    'gemini-3.5-flash-lite',
-    'gemini-3.1-pro',
-    'gemini-2.0-flash'
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-1.5-pro'
   ];
 
   const contents = customContents || [{ role: "user", parts: [{ text: promptText || "" }] }];
@@ -66,7 +65,6 @@ async function callGeminiWithFallback(
   let lastErrorText = "";
 
   for (const model of modelsToTry) {
-    // 2 próby na każdy model (z 1-sekundową pauzą na wypadek chwilowego piku 503)
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const response = await fetch(
@@ -82,19 +80,19 @@ async function callGeminiWithFallback(
           const resData = await response.json() as any;
           const text = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
           if (text.trim() !== "") {
-            return text; // Sukces! Zwracamy odpowiedź
+            return text;
           }
         }
 
         const errBody = await response.text();
         lastErrorText = `[${model} (próba ${attempt})] Status ${response.status}: ${errBody}`;
 
-        // Jeśli model nie istnieje (404), nie ponawiaj próby, przejdź od razu do kolejnego modelu
+        // Jeśli model nie istnieje (404), przejdź od razu do kolejnego modelu
         if (response.status === 404) {
           break;
         }
 
-        // Jeśli serwer jest przeciążony (503 lub 429), odczekaj 1 sekundę przed ponowieniem
+        // Jeśli serwer jest przeciążony (503 lub 429), odczekaj przed kolejną próbą
         if (response.status === 503 || response.status === 429) {
           console.warn(`[Gemini Retry] ${model} zajęty (status ${response.status}). Próba ${attempt}/2...`);
           await new Promise(r => setTimeout(r, 1000 * attempt));
@@ -531,10 +529,10 @@ export async function sendChatMessage(content: string, imageBase64?: string): Pr
 }
 
 // ==========================================
-// V. ANALIZA AKTYWNOŚCI I METRYK (STRAVA + OPEN-METEO)
+// V. ANALIZA AKTYWNOŚCI I METRYK (STRAVA + OPEN-METEO + AI)
 // ==========================================
 
-export async function sendWorkoutToAI(trainingId: number): Promise<{ success: boolean; error?: string }> {
+export async function sendWorkoutToAI(trainingId: number, userComment: string = ""): Promise<{ success: boolean; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: "Brak autoryzacji" };
@@ -548,7 +546,7 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
   const wiek = profile?.wiek || '';
   const glownaDyscyplina = profile?.glowna_dyscyplina || 'Rower';
   const zone2 = profile?.strefy_tetna?.zone2 || { min: 105, max: 115 };
-  const filozofia = profile?.filozofia_treningowa || 'Mitochondrialna baza (Zone 2)';
+  const targetCadence = profile?.strefy_tetna?.kadencja_target || 90;
 
   let temp = null;
   let windSpeed = null;
@@ -584,14 +582,27 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
   let aiAnaliza = "";
   try {
     const prompt = `Przeanalizuj dzisiejszy trening (${workout.rodzaj}) zawodnika o imieniu ${imie}:
-    Dystans: ${workout.dystans} km, Czas: ${workout.czas_minuty} min, Tętno śr: ${workout.tetno_srednie} bpm, Kadencja: ${workout.kadencja_srednia} RPM.
-    WARUNKI ATMOSFERYCZNE: ${weatherStringForAI}
-    Oceń strefę 2 (${zone2.min}-${zone2.max} bpm) w odniesieniu do tych warunków.`;
+    - Dystans: ${workout.dystans} km
+    - Czas trwania: ${workout.czas_minuty} min
+    - Średnie tętno: ${workout.tetno_srednie || 'Brak danych'} bpm
+    - Średnia kadencja: ${workout.kadencja_srednia || 'Brak danych'} RPM
+    - WARUNKI ATMOSFERYCZNE: ${weatherStringForAI}
+    - STREFY DOCELOWE: Zone 2 (${zone2.min}-${zone2.max} bpm), Kadencja (${targetCadence}+ RPM)
+
+    === WAŻNY KONTEKST I KOMENTARZ ZAWODNIKA ===
+    ${userComment ? `Zawodnik przekazał: "${userComment}"` : 'Brak dodatkowego komentarza.'}`;
 
     const dynamicSystemInstruction = `
-      Jesteś elitarnym Trenerem Osobistym i Fizjologiem Sportu. Podopieczny: ${imie}, wiek: ${wiek}, sport: ${glownaDyscyplina}. Filozofia: ${filozofia}.
-      Odpowiadaj profesjonalnie, motywująco.
-      KATEGORYCZNY WYMÓG: Jeśli w warunkach atmosferycznych podano silny wiatr (np. powyżej 15 km/h) lub ekstremalną temperaturę, uwzględnij ten wpływ na tętno i wysiłek zawodnika!
+      Jesteś elitarnym Trenerem Osobistym i Fizjologiem Sportu (styl dr. Iñigo San-Millána).
+      Podopieczny: ${imie}, wiek: ${wiek}, sport: ${glownaDyscyplina}.
+
+      === KATEGORYCZNE ZASADY ANALIZY ===
+      1. ZAWSZE RESPECTUJ KOMENTARZ ZAWODNIKA:
+         - Jeśli to jazda rekreacyjna / z rodziną / kawa i ciastko: NIE KRYTYKUJ niskiego tętna ani przerw. Pochwal aktywny wypoczynek (regenerację czynną) i korzyści psychiczne.
+         - Jeśli to jazda górska (np. Zoncolan / stromy podjazd) lub wyścig/ustawka: NIE KRYTYKUJ wyjścia ze strefy Zone 2 i wysokiego tętna. Pochwal niesamowitą siłę woli, wskaż adaptacje VO2max i zalec uzupełnienie glikogenu oraz regenerację.
+         - Jeśli brak komentarza: standardowo oceń utrzymanie Zone 2 i kadencji.
+      2. POGODA: Jeśli wiatr był silny (>15 km/h) lub temperatura skrajna, doceń walkę z warunkami.
+      3. Zwróć zwięzłą, motywującą analizę (2-3 akapity).
     `;
 
     aiAnaliza = await callGeminiWithFallback(dynamicSystemInstruction, prompt);
@@ -617,6 +628,51 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
   return { success: true };
 }
 
+/**
+ * Akcja wywoływana bezpośrednio z komponentu TrainingCard (zwraca tekst analizy i aktualizuje bazę)
+ */
+export async function analyzeTrainingAction(training: any, userComment: string = ""): Promise<string> {
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    const trainingId = typeof training === 'object' ? (training.id || training.strava_id) : training;
+
+    if (user && trainingId) {
+      const result = await sendWorkoutToAI(Number(trainingId), userComment);
+      if (!result.success && result.error) {
+        return `⚠️ Nie udało się przeprowadzić pełnej analizy: ${result.error}`;
+      }
+
+      // Pobierz zapisaną analizę z bazy
+      const { data } = await supabase
+        .from('treningi')
+        .select('ai_analiza')
+        .eq('id', Number(trainingId))
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (data?.ai_analiza) {
+        return data.ai_analiza;
+      }
+    }
+
+    // Fallback: jeśli przekazano sam obiekt bez zapisanego rekordu w bazie
+    const prompt = `
+      Przeanalizuj trening:
+      Nazwa: ${training["Nazwa Treningu"] || training.nazwa || 'Trening'}
+      Data: ${training["Data"] || training.data}
+      Dystans: ${training["Dystans"] || training.dystans}
+      Kalorie: ${training["Kalorie"] || training.kalorie}
+      Komentarz zawodnika: ${userComment || 'brak'}
+    `;
+    return await callGeminiWithFallback("Jesteś profesjonalnym trenerem kolarstwa i biegania. Uwzględnij kontekst zawodnika (rekreacja vs wyścig vs góry).", prompt);
+  } catch (err: any) {
+    console.error("Błąd analyzeTrainingAction:", err);
+    return `Wystąpił błąd podczas analizy treningu: ${err?.message || 'Spróbuj ponownie za chwilę.'}`;
+  }
+}
+
 export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; importedCount?: number; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -628,7 +684,7 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
     const clientId = process.env.STRAVA_CLIENT_ID;
     const clientSecret = process.env.STRAVA_CLIENT_SECRET;
 
-    if (!refreshToken || !clientId || !clientSecret) return { success: false, error: "Brak kluczy Strava." };
+    if (!refreshToken || !clientId || !clientSecret) return { success: false, error: "Brak skonfigurowanych kluczy Strava." };
 
     const tokenResponse = await fetch('https://www.strava.com/oauth/token', {
       method: 'POST',
@@ -644,7 +700,7 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
       headers: { Authorization: `Bearer ${tokenData.access_token}` }
     });
 
-    if (!activitiesResponse.ok) return { success: false, error: "Błąd pobierania aktywności Strava." };
+    if (!activitiesResponse.ok) return { success: false, error: "Błąd pobierania aktywności ze Strava." };
 
     const activities = await activitiesResponse.json() as any[];
     const { data: existingWorkouts } = await supabase.from('treningi').select('strava_id').eq('user_id', user.id);
@@ -685,10 +741,6 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
     revalidatePath('/');
     return { success: true, importedCount };
   } catch (err: any) {
-    return { success: false, error: err?.message || "Wystąpił błąd połączenia." };
+    return { success: false, error: err?.message || "Wystąpił błąd synchronizacji Strava." };
   }
-}
-
-export async function analyzeTrainingAction(id: number): Promise<string> {
-  return "Analiza wykonana pomyślnie.";
 }
