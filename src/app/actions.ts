@@ -48,12 +48,13 @@ async function callGeminiWithFallback(
     throw new Error("Brak skonfigurowanego klucza API Gemini na serwerze.");
   }
 
-  // Lista modeli odpytywanych kolejno w przypadku błędu 503 (przeciążenie) lub 429
+  // Lista wyłącznie aktywnych i aktualnych modeli Gemini
   const modelsToTry = [
+    'gemini-3.6-flash',
     'gemini-3.5-flash',
-    'gemini-2.0-flash',
-    'gemini-2.5-pro',
-    'gemini-1.5-pro'
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-pro',
+    'gemini-2.0-flash'
   ];
 
   const contents = customContents || [{ role: "user", parts: [{ text: promptText || "" }] }];
@@ -65,32 +66,42 @@ async function callGeminiWithFallback(
   let lastErrorText = "";
 
   for (const model of modelsToTry) {
-    try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestBody)
-        }
-      );
+    // 2 próby na każdy model (z 1-sekundową pauzą na wypadek chwilowego piku 503)
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(requestBody)
+          }
+        );
 
-      if (response.ok) {
-        const resData = await response.json() as any;
-        const text = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        if (text.trim() !== "") {
-          return text; // Sukces! Zwracamy wygenerowany tekst
+        if (response.ok) {
+          const resData = await response.json() as any;
+          const text = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
+          if (text.trim() !== "") {
+            return text; // Sukces! Zwracamy odpowiedź
+          }
         }
+
+        const errBody = await response.text();
+        lastErrorText = `[${model} (próba ${attempt})] Status ${response.status}: ${errBody}`;
+
+        // Jeśli model nie istnieje (404), nie ponawiaj próby, przejdź od razu do kolejnego modelu
+        if (response.status === 404) {
+          break;
+        }
+
+        // Jeśli serwer jest przeciążony (503 lub 429), odczekaj 1 sekundę przed ponowieniem
+        if (response.status === 503 || response.status === 429) {
+          console.warn(`[Gemini Retry] ${model} zajęty (status ${response.status}). Próba ${attempt}/2...`);
+          await new Promise(r => setTimeout(r, 1000 * attempt));
+        }
+      } catch (fetchErr: any) {
+        lastErrorText = fetchErr?.message || "Błąd sieci";
       }
-
-      const errBody = await response.text();
-      lastErrorText = `[${model}] Status ${response.status}: ${errBody}`;
-      console.warn(`[Gemini Fallback] Model ${model} niedostępny (${response.status}). Przełączam na model zapasowy...`);
-      
-      // Krótka pauza 300ms przed kolejną próbą
-      await new Promise(r => setTimeout(r, 300));
-    } catch (fetchErr: any) {
-      lastErrorText = fetchErr?.message || "Błąd sieci";
     }
   }
 
@@ -283,7 +294,6 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
       # 🥞 Protokół Dietetyczny (Cały Dzień)
     `;
 
-    // Wywołanie z mechanizmem zapasowym
     aiAnaliza = await callGeminiWithFallback(dynamicSystemInstruction, prompt);
   } catch (err: any) {
     console.error("Błąd generowania analizy poranka:", err?.message || err);
@@ -507,7 +517,6 @@ export async function sendChatMessage(content: string, imageBase64?: string): Pr
 
     let aiResponseText = "";
     try {
-      // Wywołanie odporne na błędy 503/429
       aiResponseText = await callGeminiWithFallback(dynamicChatInstruction, undefined, contents);
     } catch (aiErr: any) {
       aiResponseText = `Przepraszam, serwery AI mają chwilowe przeciążenie: ${aiErr.message}`;
@@ -585,7 +594,6 @@ export async function sendWorkoutToAI(trainingId: number): Promise<{ success: bo
       KATEGORYCZNY WYMÓG: Jeśli w warunkach atmosferycznych podano silny wiatr (np. powyżej 15 km/h) lub ekstremalną temperaturę, uwzględnij ten wpływ na tętno i wysiłek zawodnika!
     `;
 
-    // Wywołanie odporne na przeciążenia 503
     aiAnaliza = await callGeminiWithFallback(dynamicSystemInstruction, prompt);
   } catch (err: any) {
     console.error("Błąd analizy treningu:", err);
