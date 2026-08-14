@@ -36,7 +36,8 @@ function getWarsawDateString(): string {
 }
 
 /**
- * Inteligentna funkcja odpytująca Gemini z automatycznym mechanizmem Fallback (przełączaniem na modele zapasowe przy 503 / 429 / 404)
+ * Odporna funkcja dla DARMOWEGO TIERU Google AI Studio.
+ * Wykorzystuje wyłącznie aktywne, bezpłatne modele Flash i Flash-Lite.
  */
 async function callGeminiWithFallback(
   systemInstruction: string,
@@ -48,12 +49,12 @@ async function callGeminiWithFallback(
     throw new Error("Brak skonfigurowanego klucza API Gemini na serwerze.");
   }
 
-  // Lista modeli Gemini z fallbackiem
+  // Wyłącznie aktywne i darmowe modele Google AI Studio (kolejność od najinteligentniejszego do najlżejszego)
   const modelsToTry = [
     'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
     'gemini-2.0-flash',
-    'gemini-1.5-flash',
-    'gemini-1.5-pro'
+    'gemini-2.0-flash-lite'
   ];
 
   const contents = customContents || [{ role: "user", parts: [{ text: promptText || "" }] }];
@@ -79,31 +80,31 @@ async function callGeminiWithFallback(
         if (response.ok) {
           const resData = await response.json() as any;
           const text = resData.candidates?.[0]?.content?.parts?.[0]?.text || "";
-          if (text.trim() !== "") {
+          if (text && text.trim() !== "") {
             return text;
           }
         }
 
         const errBody = await response.text();
-        lastErrorText = `[${model} (próba ${attempt})] Status ${response.status}: ${errBody}`;
+        lastErrorText = `[${model}] Status ${response.status}: ${errBody}`;
 
-        // Jeśli model nie istnieje (404), przejdź od razu do kolejnego modelu
+        // Jeśli model nie istnieje (404), przejdź natychmiast do następnego
         if (response.status === 404) {
           break;
         }
 
-        // Jeśli serwer jest przeciążony (503 lub 429), odczekaj przed kolejną próbą
-        if (response.status === 503 || response.status === 429) {
-          console.warn(`[Gemini Retry] ${model} zajęty (status ${response.status}). Próba ${attempt}/2...`);
-          await new Promise(r => setTimeout(r, 1000 * attempt));
+        // Limit zapytań (429) lub przeciążenie (503) w darmowym API -> poczekaj chwilę
+        if (response.status === 429 || response.status === 503) {
+          console.warn(`[Gemini Free Tier] ${model} osiągnął limit (status ${response.status}). Próba ${attempt}/2...`);
+          await new Promise(r => setTimeout(r, 1200 * attempt));
         }
       } catch (fetchErr: any) {
-        lastErrorText = fetchErr?.message || "Błąd sieci";
+        lastErrorText = fetchErr?.message || "Błąd połączenia";
       }
     }
   }
 
-  throw new Error(`Wszystkie modele AI są chwilowo zajęte. ${lastErrorText}`);
+  throw new Error(`Darmowe API Gemini jest chwilowo przeciążone (limit na minutę). Odczekaj kilkanaście sekund i spróbuj ponownie.`);
 }
 
 // ==========================================
@@ -475,7 +476,7 @@ export async function sendChatMessage(content: string, imageBase64?: string): Pr
     const { data: todayWorkout } = await supabase.from('treningi').select('*').eq('user_id', user.id).eq('data', dzis).maybeSingle();
 
     const history = await getChatHistory();
-    const last10Messages = history.slice(-10);
+    const last10Messages = history.slice(-6);
 
     const imie = profile?.imie || 'zawodnik';
     const wiek = profile?.wiek || '';
