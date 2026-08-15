@@ -13,9 +13,12 @@ export default function DiscussWorkoutButton({
 }: DiscussWorkoutButtonProps) {
 
   const handleOpenChat = () => {
-    const text = `Trenerze, odnośnie treningu z dnia ${workoutDate} (${workoutType}${workoutDistance ? `, ${workoutDistance} km` : ''}): `;
+    const isMeditation = workoutType === 'Medytacja' || workoutType?.toLowerCase().includes('medytac');
     
-    // Wysyłamy zdarzenie do komponentu TrainerChat
+    const text = isMeditation
+      ? `Trenerze, odnośnie mojej sesji medytacji z dnia ${workoutDate}: `
+      : `Trenerze, odnośnie treningu z dnia ${workoutDate} (${workoutType}${workoutDistance ? `, ${workoutDistance} km` : ''}): `;
+    
     window.dispatchEvent(new CustomEvent('open-trainer-chat', {
       detail: { initialText: text }
     }));
@@ -28,7 +31,7 @@ export default function DiscussWorkoutButton({
       className="inline-flex items-center gap-2 text-xs text-orange-400 hover:text-orange-300 font-semibold py-1.5 px-3 rounded-lg bg-orange-500/10 border border-orange-500/20 hover:bg-orange-500/20 transition cursor-pointer active:scale-95"
     >
       <span>💬</span>
-      <span>Dyskutuj z trenerem o tym treningu na czacie &rarr;</span>
+      <span>Dyskutuj z trenerem o tej jednostce na czacie &rarr;</span>
     </button>
   );
 }

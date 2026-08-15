@@ -75,7 +75,7 @@ async function callGeminiWithFallback(
           }
         }
       } catch (e) {
-        console.warn(`[Gemini Free] Błąd z modelem ${model}, przełączam na kolejny...`);
+        console.warn(`[Gemini Free] Chwilowy błąd modelu ${model}, sprawdzam kolejne opcje...`);
       }
     }
   }
@@ -83,7 +83,7 @@ async function callGeminiWithFallback(
   // 2. KROK 2: DARMOWY RATUNEK GROQ (Llama 3.3 70B Versatile)
   if (groqKey) {
     try {
-      console.log("[AI Fallback] Gemini zajęte. Natychmiastowe przełączenie na Groq (Llama 3.3 70B)...");
+      console.log("[AI Fallback] Przełączam na bezpłatny silnik Groq (Llama 3.3 70B)...");
 
       let messages: any[] = [{ role: "system", content: systemInstruction }];
 
@@ -254,7 +254,7 @@ export async function saveMorningReport(formData: FormData): Promise<void> {
   
   const is_rest_day = formData.get('is_rest_day') === 'true';
   const workout_type = (formData.get('workout_type') as string) || 'Rower';
-  const workout_time = (formData.get('workout_time') as string) || 'popoludnie';
+  const workout_time = (formData.get('workout_time') as string) || (formData.get('preferowana_pora') as string) || 'popoludnie';
 
   const { data: profile } = await supabase.from('profile').select('*').eq('id', user.id).single();
 
@@ -464,7 +464,7 @@ export async function getRecentWorkouts(): Promise<any[]> {
 }
 
 // ==========================================
-// IV. MULTIMEDIALNY CZAT Z TRENEREM AI (Z PAMIĘCIĄ TRENINGÓW)
+// IV. MULTIMEDIALNY CZAT Z TRENEREM AI (Z PAMIĘCIĄ TRENINGÓW I MEDYTACJI)
 // ==========================================
 
 export async function getChatHistory(): Promise<Message[]> {
@@ -497,7 +497,6 @@ export async function sendChatMessage(content: string, imageBase64?: string): Pr
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Brak autoryzacji do wysłania wiadomości." };
 
-    // 1. Zapisujemy wiadomość użytkownika do bazy
     await supabase.from('czat_wiadomosci').insert([{ 
       user_id: user.id, 
       rola: 'user', 
@@ -506,8 +505,6 @@ export async function sendChatMessage(content: string, imageBase64?: string): Pr
     }]);
 
     const dzis = getWarsawDateString();
-    
-    // 2. Pobieramy profil, raport poranny i ostatnie treningi
     const { data: profile } = await supabase.from('profile').select('*').eq('id', user.id).maybeSingle();
     const { data: todayReport } = await supabase.from('poranki').select('*').eq('user_id', user.id).eq('data', dzis).maybeSingle();
     
@@ -518,7 +515,6 @@ export async function sendChatMessage(content: string, imageBase64?: string): Pr
       .order('data', { ascending: false })
       .limit(3);
 
-    // 3. Pobieramy historię czatu (ograniczamy do 6 wiadomości dla optymalizacji darmowego tieru)
     const history = await getChatHistory();
     const lastMessages = history.slice(-6);
 
@@ -530,37 +526,46 @@ export async function sendChatMessage(content: string, imageBase64?: string): Pr
     const zone2 = profile?.strefy_tetna?.zone2 || { min: 105, max: 115 };
     const targetCadence = profile?.strefy_tetna?.kadencja_target || 90;
 
-    // Budujemy czytelny kontekst ostatnich jednostek treningowych
+    // Budujemy czytelny kontekst ostatnich jednostek treningowych i medytacji
     const formattedWorkoutsContext = recentWorkouts && recentWorkouts.length > 0
-      ? recentWorkouts.map((t, i) => `
-        --- TRENING #${i + 1} (Data: ${t.data}, Dyscyplina: ${t.rodzaj}) ---
-        - Dystans: ${t.dystans || 0} km | Czas trwania: ${t.czas_minuty || 0} min
-        - Tętno śr: ${t.tetno_srednie || 'brak'} bpm (Max: ${t.tetno_max || 'brak'} bpm)
-        - Kadencja śr: ${t.kadencja_srednia || 'brak'} RPM
-        - Pogoda: ${t.weather_temp !== null ? `${t.weather_temp}°C, wiatr ${t.weather_wind_speed} km/h` : 'brak danych pogodowych'}
-        - TWOJA WCZEŚNIEJSZA ANALIZA TEGO TRENINGU: "${t.ai_analiza || 'Brak wcześniejszej analizy'}"
-      `).join('\n')
+      ? recentWorkouts.map((t, i) => {
+        const isMed = t.rodzaj === 'Medytacja' || (t.ai_analiza && t.ai_analiza.toLowerCase().includes('medytac'));
+        return isMed
+          ? `--- SESJA #${i + 1} (Data: ${t.data}, SESJA: Medytacja / Wyciszenie / Oddech) ---
+             - Czas trwania: ${t.czas_minuty || 0} minut
+             - Tętno spoczynkowe/średnie: ${t.tetno_srednie || 'brak danych'} bpm
+             - TWOJA WCZEŚNIEJSZA REFLEKSJA: "${t.ai_analiza || 'Brak'}"`
+          : `--- TRENING #${i + 1} (Data: ${t.data}, Dyscyplina: ${t.rodzaj}) ---
+             - Dystans: ${t.dystans || 0} km | Czas: ${t.czas_minuty || 0} min
+             - Tętno śr: ${t.tetno_srednie || 'brak'} bpm (Max: ${t.tetno_max || 'brak'} bpm)
+             - Kadencja śr: ${t.kadencja_srednia || 'brak'} RPM
+             - Pogoda: ${t.weather_temp !== null ? `${t.weather_temp}°C, wiatr ${t.weather_wind_speed} km/h` : 'brak danych'}
+             - TWOJA WCZEŚNIEJSZA ANALIZA: "${t.ai_analiza || 'Brak'}"`;
+      }).join('\n')
       : 'Brak zarejestrowanych jednostek treningowych w ostatnim czasie.';
 
     const dynamicChatInstruction = `
-      Jesteś Osobistym Trenerem AI i Fizjologiem Sportu (styl dr. Iñigo San-Millána).
+      Jesteś Osobistym Trenerem AI i Holistycznym Mentorem Zdrowia (styl fizjologii dr. Iñigo San-Millána połączony z głęboką regeneracją układu nerwowego).
       
       === PROFIL ZAWODNIKA ===
-      - Imię: ${imie}, Wiek: ${wiek} lat
-      - Główna dyscyplina: ${glownaDyscyplina}
-      - Cel sportowy: ${celeSportowe}
-      - Cel wagowy: ${celWagowy}
-      - Strefa 2 (Zone 2) tętna: ${zone2.min}-${zone2.max} bpm (Kadencja: ${targetCadence}+ RPM)
+      - Imię: ${imie}, Wiek: ${wiek} lat, Sport: ${glownaDyscyplina}
+      - Cel sportowy: ${celeSportowe}, Cel wagowy: ${celWagowy}
+      - Strefa 2 (Zone 2): ${zone2.min}-${zone2.max} bpm (Kadencja: ${targetCadence}+ RPM)
 
       === STAN BIOLOGICZNY NA DZIŚ (${dzis}) ===
-      ${todayReport ? `Waga rano: ${todayReport.waga} kg, HRV: ${todayReport.hrv} ms, Jakość snu: ${todayReport.jakosc_snu}/100. Twoja poranna odprawa: "${todayReport.ai_analiza}"` : '- Brak raportu porannego z dzisiaj.'}
+      ${todayReport ? `Waga rano: ${todayReport.waga} kg, HRV: ${todayReport.hrv} ms, Jakość snu: ${todayReport.jakosc_snu}/100. Odprawa: "${todayReport.ai_analiza}"` : '- Brak raportu porannego z dzisiaj.'}
 
-      === OSTATNIE JEDNOSTKI TRENINGOWE I TWOJE WCZEŚNIEJSZE ANALIZY ===
+      === OSTATNIE JEDNOSTKI TRENINGOWE I MEDYTACJE ===
       ${formattedWorkoutsContext}
 
       === KATEGORYCZNE ZASADY PROWADZENIA ROZMOWY ===
-      1. ZAWSZE ODNOSIĆ SIĘ DO FAKTÓW I LICZB: Jeśli zawodnik pyta o miniony trening, ból mięśni, tętno, tempo czy dietę po treningu – odnoś się do konkretnych wartości z powyższych treningów.
-      2. Odpowiadaj zwięźle, profesjonalnie, z motywującą pasją i kolarskim duchem.
+      1. MEDYTACJA I WYCISZENIE (NAUKI LAMY RINCZENA Z GRABNIKA):
+         - Jeśli zawodnik pyta o medytację, oddech, wyciszenie, stres czy sesję relaksacyjną: BEZWZGLĘDNIE NIE wspominaj o dystansie, watach, prędkości czy kadencji!
+         - Nawiąż do podejścia Lamy Rinczena z ośrodka w Grabniku: praktyki uważności i uspokojenia umysłu (*śine*), łagodnej obserwacji oddechu bez oceniania, niepodążania za pojawiającymi się myślami oraz rozluźniania napięć w ciele.
+         - Wskaż fizjologiczny sens: aktywacja nerwu błędnego (układ przywspółczulny), podbicie HRV, obniżenie powysiłkowego kortyzolu i regeneracja mitochondriów.
+      2. STANDARDOWE TRENINGI:
+         - Odnoś się do konkretnych liczb i wcześniejszych analiz (tętno, moc, regeneracja, dieta powysiłkowa).
+      3. Odpowiadaj zwięźle, konkretnie, z pasją i wsparciem.
     `;
 
     const contents = lastMessages.map((msg, index) => {
@@ -609,13 +614,15 @@ export async function sendWorkoutToAI(trainingId: number, userComment: string = 
   const zone2 = profile?.strefy_tetna?.zone2 || { min: 105, max: 115 };
   const targetCadence = profile?.strefy_tetna?.kadencja_target || 90;
 
+  const isMeditation = userComment.toLowerCase().includes('medytac') || workout.rodzaj === 'Medytacja';
+
   let temp = null;
   let windSpeed = null;
   let windDir = null;
   let rain = null;
   let weatherStringForAI = "Brak danych pogodowych.";
 
-  if (workout.latitude && workout.longitude) {
+  if (workout.latitude && workout.longitude && !isMeditation) {
     try {
       const dataTreningu = workout.data;
       const weatherUrl = `https://archive-api.open-meteo.com/v1/archive?latitude=${workout.latitude}&longitude=${workout.longitude}&start_date=${dataTreningu}&end_date=${dataTreningu}&hourly=temperature_2m,wind_speed_10m,wind_direction_10m,rain&wind_speed_unit=ms`;
@@ -642,38 +649,45 @@ export async function sendWorkoutToAI(trainingId: number, userComment: string = 
 
   let aiAnaliza = "";
   try {
-    const prompt = `Przeanalizuj dzisiejszy trening (${workout.rodzaj}) zawodnika o imieniu ${imie}:
-    - Dystans: ${workout.dystans} km
-    - Czas trwania: ${workout.czas_minuty} min
-    - Średnie tętno: ${workout.tetno_srednie || 'Brak danych'} bpm
-    - Średnia kadencja: ${workout.kadencja_srednia || 'Brak danych'} RPM
-    - WARUNKI ATMOSFERYCZNE: ${weatherStringForAI}
-    - STREFY DOCELOWE: Zone 2 (${zone2.min}-${zone2.max} bpm), Kadencja (${targetCadence}+ RPM)
-
-    === WAŻNY KONTEKST I KOMENTARZ ZAWODNIKA ===
-    ${userComment ? `Zawodnik przekazał: "${userComment}"` : 'Brak dodatkowego komentarza.'}`;
+    const prompt = isMeditation 
+      ? `Przeanalizuj sesję medytacji/wyciszenia zawodnika o imieniu ${imie}:
+         - Czas trwania: ${workout.czas_minuty} minut
+         - Tętno spoczynkowe/średnie: ${workout.tetno_srednie || 'brak danych'} bpm
+         - Komentarz / odczucia: "${userComment}"`
+      : `Przeanalizuj dzisiejszy trening (${workout.rodzaj}) zawodnika o imieniu ${imie}:
+         - Dystans: ${workout.dystans} km
+         - Czas trwania: ${workout.czas_minuty} min
+         - Średnie tętno: ${workout.tetno_srednie || 'Brak danych'} bpm
+         - Średnia kadencja: ${workout.kadencja_srednia || 'Brak danych'} RPM
+         - WARUNKI ATMOSFERYCZNE: ${weatherStringForAI}
+         - STREFY DOCELOWE: Zone 2 (${zone2.min}-${zone2.max} bpm), Kadencja (${targetCadence}+ RPM)
+         === WAŻNY KONTEKST I KOMENTARZ ZAWODNIKA ===
+         ${userComment ? `Zawodnik przekazał: "${userComment}"` : 'Brak dodatkowego komentarza.'}`;
 
     const dynamicSystemInstruction = `
-      Jesteś elitarnym Trenerem Osobistym i Fizjologiem Sportu (styl dr. Iñigo San-Millána).
-      Podopieczny: ${imie}, wiek: ${wiek}, sport: ${glownaDyscyplina}.
+      Jesteś elitarnym Trenerem Osobistym i Fizjologiem Sportu (styl dr. Iñigo San-Millána) oraz mentorem regeneracji układu nerwowego.
+      Podopieczny: ${imie}, wiek: ${wiek}, sport główny: ${glownaDyscyplina}.
 
       === KATEGORYCZNE ZASADY ANALIZY ===
-      1. ZAWSZE RESPECTUJ KOMENTARZ ZAWODNIKA:
-         - Jeśli to jazda rekreacyjna / z rodziną / kawa i ciastko: NIE KRYTYKUJ niskiego tętna ani przerw. Pochwal aktywny wypoczynek (regenerację czynną) i korzyści psychiczne.
-         - Jeśli to jazda górska (np. Zoncolan / stromy podjazd) lub wyścig/ustawka: NIE KRYTYKUJ wyjścia ze strefy Zone 2 i wysokiego tętna. Pochwal niesamowitą siłę woli, wskaż adaptacje VO2max i zalec uzupełnienie glikogenu oraz regenerację.
-         - Jeśli brak komentarza: standardowo oceń utrzymanie Zone 2 i kadencji.
-      2. POGODA: Jeśli wiatr był silny (>15 km/h) lub temperatura skrajna, doceń walkę z warunkami.
-      3. Zwróć zwięzłą, motywującą analizę (2-3 akapity).
+      1. JEŚLI SESJA TO MEDYTACJA / WYCISZENIE:
+         - BEZWZGLĘDNIE ZABRANIAM pytania o prędkość, dystans, waty czy strefy tętna!
+         - Odnieś się do nauk Lamy Rinczena z Grabnika (uspokojenie umysłu *śine*, nieoceniająca obserwacja oddechu, puszczanie napięć).
+         - Wyjaśnij korzyść fizjologiczną: aktywacja nerwu błędnego, redukcja kortyzolu, wsparcie mitochondriów i regeneracja HRV.
+      2. JEŚLI JAZDA REKREACYJNA / RODZINA:
+         - NIE KRYTYKUJ niskiego tętna ani przerw. Pochwal aktywny wypoczynek (regenerację czynną) i relacje.
+      3. JEŚLI WSPINACZKA GÓRSKA (ZONCOLAN / TEST / MAX) LUB WYŚCIG:
+         - NIE KRYTYKUJ wyjścia z Zone 2. Doceń siłę woli, pułap tlenowy (VO2max) i zalec uzupełnienie glikogenu.
+      4. Zwróć motywującą, zwięzłą analizę w formacie Markdown (2-3 akapity).
     `;
 
     aiAnaliza = await callGeminiWithFallback(dynamicSystemInstruction, prompt);
   } catch (err: any) {
-    console.error("Błąd analizy treningu:", err);
+    console.error("Błąd analizy aktywności:", err);
     return { success: false, error: err?.message || "Wystąpił błąd generowania analizy." };
   }
 
   if (!aiAnaliza || aiAnaliza.trim() === "") {
-    return { success: false, error: "AI zwróciło pustą analizę treningu." };
+    return { success: false, error: "AI zwróciło pustą analizę." };
   }
 
   await supabase.from('treningi').update({ 
@@ -690,7 +704,7 @@ export async function sendWorkoutToAI(trainingId: number, userComment: string = 
 }
 
 /**
- * Akcja wywoływana bezpośrednio z komponentu TrainingCard (zwraca tekst analizy)
+ * Akcja wywoływana z komponentu TrainingCard
  */
 export async function analyzeTrainingAction(training: any, userComment: string = ""): Promise<string> {
   try {
@@ -717,20 +731,21 @@ export async function analyzeTrainingAction(training: any, userComment: string =
       }
     }
 
-    const prompt = `
-      Przeanalizuj trening:
-      Nazwa: ${training["Nazwa Treningu"] || training.nazwa || 'Trening'}
-      Data: ${training["Data"] || training.data}
-      Dystans: ${training["Dystans"] || training.dystans}
-      Kalorie: ${training["Kalorie"] || training.kalorie}
-      Komentarz zawodnika: ${userComment || 'brak'}
-    `;
-    return await callGeminiWithFallback("Jesteś profesjonalnym trenerem kolarstwa i biegania. Uwzględnij kontekst zawodnika (rekreacja vs wyścig vs góry).", prompt);
+    const isMed = userComment.toLowerCase().includes('medytac');
+    const prompt = isMed
+      ? `Przeanalizuj sesję medytacji: Czas: ${training["Czas"] || training.czas_minuty || 15} min, Komentarz: ${userComment}`
+      : `Przeanalizuj trening: Nazwa: ${training["Nazwa Treningu"] || training.nazwa || 'Trening'}, Dystans: ${training["Dystans"] || training.dystans}, Komentarz: ${userComment || 'brak'}`;
+
+    return await callGeminiWithFallback("Jesteś profesjonalnym trenerem i mentorem regeneracji (nauki Lamy Rinczena z Grabnika dla medytacji).", prompt);
   } catch (err: any) {
     console.error("Błąd analyzeTrainingAction:", err);
-    return `Wystąpił błąd podczas analizy treningu: ${err?.message || 'Spróbuj ponownie za chwilę.'}`;
+    return `Wystąpił błąd podczas analizy: ${err?.message || 'Spróbuj ponownie za chwilę.'}`;
   }
 }
+
+// ==========================================
+// VI. SYNCHRONIZACJA ZE STRAVĄ (BEZPIECZNE MAPOWANIE ENUM)
+// ==========================================
 
 export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; importedCount?: number; error?: string }> {
   const supabase = await createClient();
@@ -766,26 +781,17 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
     const existingIds = new Set(existingWorkouts?.map(t => Number(t.strava_id)) || []);
 
     const newWorkouts = activities.filter(act => !existingIds.has(act.id)).map(act => {
-      // INTELIGENTNE ROZPOZNAWANIE DYSCYPLINY (Garmin -> Strava -> Portal)
-      const nameLower = (act.name || '').toLowerCase();
-      let rodzaj = 'Trening';
+      // Bezpieczne mapowanie wyłącznie na dozwolone wartości ENUM w Supabase:
+      let rodzaj = 'Siłownia';
 
-      if (act.type === 'Ride' || act.type === 'VirtualRide' || nameLower.includes('rower') || nameLower.includes('ride') || nameLower.includes('szosa')) {
+      if (act.type === 'Ride' || act.type === 'VirtualRide' || act.type === 'GravelRide' || act.type === 'MountainBikeRide') {
         rodzaj = 'Rower';
-      } else if (act.type === 'Run' || act.type === 'VirtualRun' || nameLower.includes('bieg') || nameLower.includes('run')) {
+      } else if (act.type === 'Run' || act.type === 'VirtualRun' || act.type === 'TrailRun') {
         rodzaj = 'Bieg';
-      } else if (act.type === 'Walk' || act.type === 'Hike' || nameLower.includes('spacer') || nameLower.includes('marsz')) {
-        rodzaj = 'Marsz/Spacer';
-      } else if (act.type === 'Swim' || nameLower.includes('pływ') || nameLower.includes('swim')) {
+      } else if (act.type === 'Swim') {
         rodzaj = 'Pływanie';
-      } else if (act.type === 'Yoga' || nameLower.includes('joga') || nameLower.includes('yoga')) {
-        rodzaj = 'Joga';
-      } else if (nameLower.includes('medytac') || nameLower.includes('oddech') || nameLower.includes('breathwork') || nameLower.includes('mindful') || nameLower.includes('relaks')) {
-        rodzaj = 'Medytacja / Regeneracja';
-      } else if (act.type === 'WeightTraining' || nameLower.includes('siłow') || nameLower.includes('gym')) {
-        rodzaj = 'Siłownia';
       } else {
-        rodzaj = 'Trening ogólny';
+        rodzaj = 'Siłownia';
       }
 
       const latitude = act.start_latlng && act.start_latlng[0] ? act.start_latlng[0] : null;

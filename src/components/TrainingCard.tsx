@@ -19,11 +19,14 @@ export default function TrainingCard({ workout }: TrainingCardProps) {
   const [loading, setLoading] = useState(false);
   const [userComment, setUserComment] = useState("");
 
+  const isMeditation = userComment.includes("Medytacja") || workout.rodzaj === "Medytacja";
+
   const quickNotes = [
+    "🧘‍♂️ Medytacja / Uważność (Lama Rinczen)",
     "🚴‍♂️ Jazda z rodziną / rekreacja",
     "⛰️ Wspinaczka górska (max wysiłek)",
     "⚡ Ustawka / wyścig / ostra jazda",
-    "🌧️ Ciężkie warunki / silny wiatr"
+    "🌧️ Ciężkie warunki / wiatr"
   ];
 
   const handleAnalyze = async () => {
@@ -40,46 +43,57 @@ export default function TrainingCard({ workout }: TrainingCardProps) {
   return (
     <section className="bg-slate-900 border border-orange-900/40 rounded-2xl p-6 shadow-xl relative overflow-hidden space-y-4">
       <div className="absolute top-0 right-0 bg-orange-600/15 text-orange-400 text-[10px] uppercase font-extrabold px-3 py-1.5 rounded-bl-xl tracking-wider">
-        Nowy trening ze Strava
+        {isMeditation ? "Sesja Regeneracji / Medytacji" : "Nowy trening ze Strava"}
       </div>
       
       <div>
         <h2 className="text-lg font-bold text-orange-400 flex items-center gap-2">
-          🚴‍♂️ Trening czeka na odprawę AI
+          {isMeditation ? "🧘‍♂️ Sesja Medytacji czeka na omówienie" : "🚴‍♂️ Trening czeka na odprawę AI"}
         </h2>
         <p className="text-slate-400 text-xs mt-1">
-          Wykryliśmy nową aktywność z dnia {workout.data}. Wyślij ją do Trenera, aby uzyskać pełną analizę.
+          {isMeditation 
+            ? `Wykryto sesję wyciszenia z dnia ${workout.data}. Przeanalizuj wpływ na układ nerwowy z Trenerem.`
+            : `Wykryliśmy nową aktywność z dnia ${workout.data}. Wyślij ją do Trenera, aby uzyskać pełną analizę.`
+          }
         </p>
       </div>
       
-      {/* Statystyki treningu */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-slate-950 p-4 rounded-xl border border-slate-850 text-xs">
+      {/* Statystyki: Ukrywamy dystans i kadencję przy medytacji */}
+      <div className={`grid gap-4 bg-slate-950 p-4 rounded-xl border border-slate-850 text-xs ${
+        isMeditation ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-4"
+      }`}>
         <div>
-          <span className="text-slate-500 block">Dyscyplina:</span>
-          <span className="font-bold text-slate-200 block text-sm mt-0.5">{workout.rodzaj}</span>
-        </div>
-        <div>
-          <span className="text-slate-500 block">Dystans:</span>
+          <span className="text-slate-500 block">Aktywność:</span>
           <span className="font-bold text-slate-200 block text-sm mt-0.5">
-            {workout.dystans ? `${workout.dystans} km` : '---'}
+            {isMeditation ? "Medytacja / Oddech" : workout.rodzaj}
           </span>
         </div>
         <div>
           <span className="text-slate-500 block">Czas trwania:</span>
           <span className="font-bold text-slate-200 block text-sm mt-0.5">{workout.czas_minuty} minut</span>
         </div>
-        <div>
-          <span className="text-slate-500 block">Tętno śr.:</span>
-          <span className="font-bold text-slate-200 block text-sm mt-0.5">
-            {workout.tetno_srednie ? `${workout.tetno_srednie} bpm` : '---'}
-          </span>
-        </div>
+        {!isMeditation && (
+          <>
+            <div>
+              <span className="text-slate-500 block">Dystans:</span>
+              <span className="font-bold text-slate-200 block text-sm mt-0.5">
+                {workout.dystans ? `${workout.dystans} km` : '---'}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-500 block">Tętno śr.:</span>
+              <span className="font-bold text-slate-200 block text-sm mt-0.5">
+                {workout.tetno_srednie ? `${workout.tetno_srednie} bpm` : '---'}
+              </span>
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Komentarz i tagi kontekstowe dla trenera */}
+      {/* Szybkie tagi kontekstowe */}
       <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-2.5">
         <label className="block text-xs font-semibold text-slate-400">
-          💬 Dodaj kontekst dla Trenera przed wysłaniem (opcjonalnie):
+          💬 Dodaj kontekst dla Trenera (np. wybierz medytację lub wpisz własne odczucia):
         </label>
         
         <div className="flex flex-wrap gap-2">
@@ -103,12 +117,12 @@ export default function TrainingCard({ workout }: TrainingCardProps) {
           type="text"
           value={userComment}
           onChange={(e) => setUserComment(e.target.value)}
-          placeholder="np. Jechałem z dziećmi na lody / atak na Zoncolana / ból nogi..."
+          placeholder="np. Skupiłem się na oddechu / medytacja śine / gonitwa myśli..."
           className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-xs focus:outline-none focus:border-orange-500 transition"
         />
       </div>
 
-      {/* Przycisk wysyłki ze stanem ładowania */}
+      {/* Przycisk wysyłki */}
       <button
         onClick={handleAnalyze}
         disabled={loading}
@@ -124,12 +138,12 @@ export default function TrainingCard({ workout }: TrainingCardProps) {
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
             </svg>
-            <span>Trener analizuje dane i pogodę...</span>
+            <span>Trener analizuje sesję...</span>
           </>
         ) : (
           <>
-            <span>🚀</span>
-            <span>Wyślij do odprawy AI</span>
+            <span>{isMeditation ? "🧘‍♂️" : "🚀"}</span>
+            <span>{isMeditation ? "Omów sesję medytacji z Trenerem" : "Wyślij do odprawy AI"}</span>
           </>
         )}
       </button>
