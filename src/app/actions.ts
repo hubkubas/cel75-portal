@@ -766,10 +766,27 @@ export async function syncStravaWorkoutsAction(): Promise<{ success: boolean; im
     const existingIds = new Set(existingWorkouts?.map(t => Number(t.strava_id)) || []);
 
     const newWorkouts = activities.filter(act => !existingIds.has(act.id)).map(act => {
-      let rodzaj = 'Bieg';
-      if (act.type === 'Ride' || act.type === 'VirtualRide') rodzaj = 'Rower';
-      if (act.type === 'Swim') rodzaj = 'Pływanie';
-      if (act.type === 'WeightTraining' || act.type === 'Workout') rodzaj = 'Siłownia';
+      // INTELIGENTNE ROZPOZNAWANIE DYSCYPLINY (Garmin -> Strava -> Portal)
+      const nameLower = (act.name || '').toLowerCase();
+      let rodzaj = 'Trening';
+
+      if (act.type === 'Ride' || act.type === 'VirtualRide' || nameLower.includes('rower') || nameLower.includes('ride') || nameLower.includes('szosa')) {
+        rodzaj = 'Rower';
+      } else if (act.type === 'Run' || act.type === 'VirtualRun' || nameLower.includes('bieg') || nameLower.includes('run')) {
+        rodzaj = 'Bieg';
+      } else if (act.type === 'Walk' || act.type === 'Hike' || nameLower.includes('spacer') || nameLower.includes('marsz')) {
+        rodzaj = 'Marsz/Spacer';
+      } else if (act.type === 'Swim' || nameLower.includes('pływ') || nameLower.includes('swim')) {
+        rodzaj = 'Pływanie';
+      } else if (act.type === 'Yoga' || nameLower.includes('joga') || nameLower.includes('yoga')) {
+        rodzaj = 'Joga';
+      } else if (nameLower.includes('medytac') || nameLower.includes('oddech') || nameLower.includes('breathwork') || nameLower.includes('mindful') || nameLower.includes('relaks')) {
+        rodzaj = 'Medytacja / Regeneracja';
+      } else if (act.type === 'WeightTraining' || nameLower.includes('siłow') || nameLower.includes('gym')) {
+        rodzaj = 'Siłownia';
+      } else {
+        rodzaj = 'Trening ogólny';
+      }
 
       const latitude = act.start_latlng && act.start_latlng[0] ? act.start_latlng[0] : null;
       const longitude = act.start_latlng && act.start_latlng[1] ? act.start_latlng[1] : null;
