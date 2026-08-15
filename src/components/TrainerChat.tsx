@@ -6,17 +6,34 @@ import { sendChatMessage, getChatHistory, clearChatHistory, Message } from '@/ap
 export default function TrainerChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [image, setImage] = useState<string | null>(null); // przechowuje obrazek w formacie Base64
+  const [image, setImage] = useState<string | null>(null); // Base64
   const [loading, setLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
 
   const fetchHistory = async () => {
     const history = await getChatHistory();
     setMessages(history);
   };
+
+  // Nasłuchiwanie na kliknięcie przycisku "Dyskutuj o tym treningu"
+  useEffect(() => {
+    const handleOpenChat = (event: any) => {
+      setIsOpen(true);
+      if (event.detail?.initialText) {
+        setInput(event.detail.initialText);
+      }
+      setTimeout(() => {
+        chatInputRef.current?.focus();
+      }, 100);
+    };
+
+    window.addEventListener('open-trainer-chat', handleOpenChat);
+    return () => window.removeEventListener('open-trainer-chat', handleOpenChat);
+  }, []);
 
   useEffect(() => {
     fetchHistory();
@@ -50,7 +67,7 @@ export default function TrainerChat() {
     if (fileInputRef.current) fileInputRef.current.value = '';
     setLoading(true);
 
-    // Optymistyczne dodanie do stanu lokalnego dla natychmiastowego feedbacku w UI
+    // Optymistyczne dodanie do stanu lokalnego
     setMessages((prev) => [
       ...prev, 
       { rola: 'user', tresc: tempUserMessage, obrazek_base64: tempImage || undefined }
@@ -74,7 +91,7 @@ export default function TrainerChat() {
   };
 
   return (
-    <div className="fixed bottom-5 right-5 z-50 w-full max-w-md px-4 sm:px-0">
+    <div id="trainer-chat" className="fixed bottom-5 right-5 z-50 w-full max-w-md px-4 sm:px-0">
       {/* Przycisk otwierania czatu */}
       {!isOpen && (
         <button
@@ -93,8 +110,8 @@ export default function TrainerChat() {
             <div className="flex items-center gap-2">
               <span className="text-xl">🚴‍♂️</span>
               <div>
-                <h3 className="font-bold text-slate-100 text-sm">Wóz Techniczny / Trener Gemini</h3>
-                <p className="text-xs text-emerald-400">Na linii z Hubertem</p>
+                <h3 className="font-bold text-slate-100 text-sm">Wóz Techniczny / Trener AI</h3>
+                <p className="text-xs text-emerald-400">Na linii z Tobą</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -117,8 +134,8 @@ export default function TrainerChat() {
           <div className="flex-1 overflow-y-auto p-4 space-y-4 text-sm scrollbar-thin scrollbar-thumb-slate-700">
             {messages.length === 0 ? (
               <div className="text-center text-slate-500 mt-8">
-                <p className="text-base">👋 Cześć Hubert!</p>
-                <p className="text-xs mt-1">Napisz lub wyślij zdjęcie menu / posiłku, a przeanalizuję go pod kątem Twojej formy.</p>
+                <p className="text-base">👋 Cześć!</p>
+                <p className="text-xs mt-1">Napisz do mnie lub dopytaj o miniony trening / dietę, a przeanalizuję wszystko pod kątem Twojej formy.</p>
               </div>
             ) : (
               messages.map((msg, index) => (
@@ -133,7 +150,6 @@ export default function TrainerChat() {
                         : 'bg-slate-800 text-slate-200 rounded-bl-none border border-slate-700'
                     }`}
                   >
-                    {/* Jeśli wiadomość ma zapisany obrazek, wyświetlamy go */}
                     {msg.obrazek_base64 && (
                       <div className="mb-2 max-w-[200px] rounded overflow-hidden border border-emerald-500">
                         <img src={msg.obrazek_base64} alt="Przesłane zdjęcie" className="w-full h-auto object-cover" />
@@ -147,19 +163,19 @@ export default function TrainerChat() {
             {loading && (
               <div className="flex justify-start">
                 <div className="bg-slate-800 text-slate-400 rounded-lg px-4 py-2.5 rounded-bl-none border border-slate-700 flex items-center gap-2">
-                  <span className="animate-pulse">Trener analizuje dane i zdjęcie...</span>
+                  <span className="animate-pulse">Trener analizuje dane i odpowiada...</span>
                 </div>
               </div>
             )}
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Podgląd wybranego zdjęcia przed wysłaniem */}
+          {/* Podgląd wybranego zdjęcia */}
           {image && (
             <div className="px-3 py-1 bg-slate-950 flex items-center justify-between border-t border-slate-800">
               <div className="flex items-center gap-2">
                 <img src={image} alt="Podgląd" className="w-10 h-10 object-cover rounded border border-emerald-500" />
-                <span className="text-xs text-slate-400">Zdjęcie przygotowane do wysłania</span>
+                <span className="text-xs text-slate-400">Zdjęcie gotowe do wysłania</span>
               </div>
               <button
                 type="button"
@@ -174,9 +190,8 @@ export default function TrainerChat() {
             </div>
           )}
 
-          {/* Formularz wprowadzania wiadomości i plików */}
+          {/* Formularz wprowadzania wiadomości */}
           <form onSubmit={handleSubmit} className="p-3 bg-slate-950 border-t border-slate-800 flex gap-2 items-center">
-            {/* Przycisk dodawania zdjęcia */}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -195,10 +210,11 @@ export default function TrainerChat() {
             />
 
             <input
+              ref={chatInputRef}
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Zapytaj np. czy możesz zjeść jabłko..."
+              placeholder="Zadaj pytanie trenerowi..."
               disabled={loading}
               className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-sm focus:outline-none focus:border-emerald-500 disabled:opacity-50"
             />
