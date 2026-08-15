@@ -1,61 +1,97 @@
 'use client'
 
 import { useState } from 'react';
-import { analyzeTrainingAction } from '../app/actions';
+import { sendWorkoutToAI } from '@/app/actions';
 
-export default function TrainingCard({ training }: { training: any }) {
-  const [analysis, setAnalysis] = useState("");
+interface TrainingCardProps {
+  workout: {
+    id: number;
+    rodzaj: string;
+    data: string;
+    dystans: number | null;
+    czas_minuty: number;
+    tetno_srednie: number | null;
+    kadencja_srednia?: number | null;
+  };
+}
+
+export default function TrainingCard({ workout }: TrainingCardProps) {
   const [loading, setLoading] = useState(false);
   const [userComment, setUserComment] = useState("");
 
   const quickNotes = [
-    "🚴‍♂️ Jazda rekreacyjna / z rodziną (kawa & lody)",
-    "⛰️ Wspinaczka górska / wjazd (max wysiłek)",
+    "🚴‍♂️ Jazda z rodziną / rekreacja",
+    "⛰️ Wspinaczka górska (max wysiłek)",
     "⚡ Ustawka / wyścig / ostra jazda",
-    "🌧️ Złe warunki / walka z wiatrem"
+    "🌧️ Ciężkie warunki / silny wiatr"
   ];
 
   const handleAnalyze = async () => {
     setLoading(true);
     try {
-      // Przekazujemy dane treningu ORAZ opcjonalny komentarz zawodnika
-      const result = await analyzeTrainingAction(training, userComment);
-      setAnalysis(result);
+      await sendWorkoutToAI(workout.id, userComment);
     } catch (error) {
-      console.error("Błąd podczas analizy treningu:", error);
+      console.error("Błąd analizy treningu:", error);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="bg-gray-900 p-6 rounded-xl border border-gray-800 shadow-sm space-y-4">
-      {/* Nagłówek treningu */}
+    <section className="bg-slate-900 border border-orange-900/40 rounded-2xl p-6 shadow-xl relative overflow-hidden space-y-4">
+      <div className="absolute top-0 right-0 bg-orange-600/15 text-orange-400 text-[10px] uppercase font-extrabold px-3 py-1.5 rounded-bl-xl tracking-wider">
+        Nowy trening ze Strava
+      </div>
+      
       <div>
-        <h2 className="text-xl font-bold text-white">{training["Nazwa Treningu"]}</h2>
-        <p className="text-gray-400 text-sm">{training["Data"]}</p>
-        <div className="text-sm text-gray-300 mt-1">
-          Dystans: <span className="font-semibold text-white">{training["Dystans"]}</span> | Kalorie: <span className="font-semibold text-white">{training["Kalorie"]}</span>
+        <h2 className="text-lg font-bold text-orange-400 flex items-center gap-2">
+          🚴‍♂️ Trening czeka na odprawę AI
+        </h2>
+        <p className="text-slate-400 text-xs mt-1">
+          Wykryliśmy nową aktywność z dnia {workout.data}. Wyślij ją do Trenera, aby uzyskać pełną analizę.
+        </p>
+      </div>
+      
+      {/* Statystyki treningu */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-slate-950 p-4 rounded-xl border border-slate-850 text-xs">
+        <div>
+          <span className="text-slate-500 block">Dyscyplina:</span>
+          <span className="font-bold text-slate-200 block text-sm mt-0.5">{workout.rodzaj}</span>
+        </div>
+        <div>
+          <span className="text-slate-500 block">Dystans:</span>
+          <span className="font-bold text-slate-200 block text-sm mt-0.5">
+            {workout.dystans ? `${workout.dystans} km` : '---'}
+          </span>
+        </div>
+        <div>
+          <span className="text-slate-500 block">Czas trwania:</span>
+          <span className="font-bold text-slate-200 block text-sm mt-0.5">{workout.czas_minuty} minut</span>
+        </div>
+        <div>
+          <span className="text-slate-500 block">Tętno śr.:</span>
+          <span className="font-bold text-slate-200 block text-sm mt-0.5">
+            {workout.tetno_srednie ? `${workout.tetno_srednie} bpm` : '---'}
+          </span>
         </div>
       </div>
 
-      {/* Sekcja komentarza / kontekstu dla trenera */}
-      <div className="bg-gray-800/50 p-3 rounded-lg border border-gray-700/60">
-        <label className="block text-xs font-medium text-gray-300 mb-1.5">
-          💬 Dodaj kontekst dla trenera (opcjonalnie):
+      {/* Komentarz i tagi kontekstowe dla trenera */}
+      <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-2.5">
+        <label className="block text-xs font-semibold text-slate-400">
+          💬 Dodaj kontekst dla Trenera przed wysłaniem (opcjonalnie):
         </label>
         
-        {/* Szybkie tagi do kliknięcia */}
-        <div className="flex flex-wrap gap-1.5 mb-2">
+        <div className="flex flex-wrap gap-2">
           {quickNotes.map((note) => (
             <button
               key={note}
               type="button"
               onClick={() => setUserComment(note)}
-              className={`text-xs px-2.5 py-1 rounded-full border transition ${
+              className={`text-xs px-2.5 py-1 rounded-lg border transition ${
                 userComment === note
-                  ? "bg-amber-500/20 border-amber-400 text-amber-300 font-medium"
-                  : "bg-gray-800 border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-600"
+                  ? "bg-orange-500/20 border-orange-400 text-orange-300 font-medium"
+                  : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700"
               }`}
             >
               {note}
@@ -63,72 +99,40 @@ export default function TrainingCard({ training }: { training: any }) {
           ))}
         </div>
 
-        {/* Pole tekstowe na własną uwagę */}
         <input
           type="text"
           value={userComment}
           onChange={(e) => setUserComment(e.target.value)}
-          placeholder="np. Jechałem z rodziną / Zoncolan na 100% / bolała noga..."
-          className="w-full bg-gray-950 border border-gray-700 rounded-md px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition"
+          placeholder="np. Jechałem z dziećmi na lody / atak na Zoncolana / ból nogi..."
+          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 text-xs focus:outline-none focus:border-orange-500 transition"
         />
       </div>
-      
-      {/* Przycisk wysyłki do AI */}
-      <button 
+
+      {/* Przycisk wysyłki ze stanem ładowania */}
+      <button
         onClick={handleAnalyze}
         disabled={loading}
-        className={`w-full py-2.5 px-4 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2 ${
-          loading 
-            ? "bg-blue-600/40 text-blue-200 border border-blue-500/30 cursor-not-allowed animate-pulse" 
-            : "bg-blue-600 hover:bg-blue-500 text-white cursor-pointer active:scale-95 shadow-md shadow-blue-900/20"
+        className={`w-full sm:w-auto font-bold py-2.5 px-6 rounded-lg text-sm transition-all flex items-center justify-center gap-2 ${
+          loading
+            ? "bg-orange-600/40 text-orange-200 border border-orange-500/30 cursor-not-allowed animate-pulse"
+            : "bg-orange-600 hover:bg-orange-500 text-white cursor-pointer active:scale-95 shadow-lg shadow-orange-950/40"
         }`}
       >
         {loading ? (
           <>
-            <svg 
-              className="animate-spin h-4 w-4 text-blue-300" 
-              xmlns="http://www.w3.org/2000/svg" 
-              fill="none" 
-              viewBox="0 0 24 24"
-            >
+            <svg className="animate-spin h-4 w-4 text-orange-200" viewBox="0 0 24 24" fill="none">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
             </svg>
-            <span>Trener analizuje dane i Twój komentarz...</span>
+            <span>Trener analizuje dane i pogodę...</span>
           </>
         ) : (
           <>
-            <span>🧠</span>
-            <span>Poproś trenera o analizę</span>
+            <span>🚀</span>
+            <span>Wyślij do odprawy AI</span>
           </>
         )}
       </button>
-
-      {/* Odpowiedź trenera AI */}
-      {analysis && (
-  <div className="mt-4 space-y-3">
-    <div className="p-4 bg-blue-950/30 border border-blue-800/60 rounded-lg text-blue-200 text-sm leading-relaxed whitespace-pre-wrap">
-      {analysis}
-    </div>
-
-    {/* Przycisk przejścia do pogłębionej dyskusji na czacie */}
-    <a
-      href="#trainer-chat"
-      onClick={() => {
-        // Opcjonalnie: można ustawić fokus na polu czatu
-        const chatInput = document.querySelector('textarea, input[type="text"]') as HTMLInputElement;
-        if (chatInput) {
-          chatInput.value = `Trenerze, odnośnie treningu z ${training["Data"] || training.data} (${training["Nazwa Treningu"] || ''}): `;
-          chatInput.focus();
-        }
-      }}
-      className="inline-flex items-center gap-2 text-xs text-amber-400 hover:text-amber-300 font-medium py-1 px-2 rounded bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 transition"
-    >
-      <span>💬</span>
-      <span>Dopytaj trenera o szczegóły tej jednostki na czacie &rarr;</span>
-    </a>
-  </div>
-)}
-    </div>
+    </section>
   );
 }

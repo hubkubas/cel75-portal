@@ -5,11 +5,11 @@ import {
   getDashboardStats, 
   getLatestAnalyses, 
   saveMorningReport, 
-  sendWorkoutToAI,
   logout
 } from './actions';
 import StravaSyncButton from '@/components/StravaSyncButton';
 import TrainerChat from '@/components/TrainerChat';
+import TrainingCard from '@/components/TrainingCard';
 import { SubmitButton } from './submit-button';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/utils/supabase/server';
@@ -26,16 +26,16 @@ export default async function Page() {
     redirect('/login');
   }
 
-  // 1. Pobieramy rozszerzone dane profilu (dodana kolumna onboarded, cel_wagowy, wiek)
-// Pobieramy dane profilu do pełnej personalizacji interfejsu (UI)
-const { data: profile } = await supabase
-.from('profile')
-.select('*') // Bezpieczny select, który nie wywoła błędu przy brakujących kolumnach
-.eq('id', user.id)
-.maybeSingle();
+  // Pobieramy dane profilu
+  const { data: profile } = await supabase
+    .from('profile')
+    .select('*')
+    .eq('id', user.id)
+    .maybeSingle();
 
-  // 2. Warunek blokujący: Sprawdzamy, czy użytkownik musi przejść onboarding
-  const needsOnboarding = !profile || !profile.onboarded;
+  // Warunek blokujący Onboarding (sprawdza obie flagi)
+  const isCompleted = profile?.onboarding_completed || profile?.onboarded;
+  const needsOnboarding = !profile || !isCompleted;
 
   if (needsOnboarding) {
     return (
@@ -52,13 +52,11 @@ const { data: profile } = await supabase
   const nazwaZalogowanego = profile?.imie || 'Zawodnik';
   const glownaDyscyplina = profile?.glowna_dyscyplina || 'Rower';
 
-  // --- DYNAMICZNY GENERATOR ETYKIET I OPISÓW ---
+  // DYNAMICZNY GENERATOR ETYKIET I OPISÓW
   let naglowekFormularza = '📝 Poranny raport biologiczny';
   let podtytulFormularza = 'Wprowadź swoje dzisiejsze parametry, aby wygenerować spersonalizowaną odprawę, plan treningowy lub dietę regeneracyjną na dziś.';
   let placeholderNotatek = 'Jak się dziś czujesz? Jakieś dolegliwości? Wpływ wczorajszego protokołu na sen...';
 
-// Przed zmianą: else if (glownaDyscyplina === 'Marsz/Spacer') {
-  // Po zmianie:
   if (glownaDyscyplina === 'Bieg') {
     naglowekFormularza = '👟 Poranny raport biegowy';
   } else if (glownaDyscyplina === 'Marsz/Spacer' || glownaDyscyplina === 'Senior') {
@@ -68,34 +66,24 @@ const { data: profile } = await supabase
     naglowekFormularza = '🚴‍♂️ Poranny raport kolarski';
   }
 
-  // Pobieranie danych (wykonywane tylko gdy użytkownik pomyślnie ukończył onboarding)
+  // Pobieranie danych
   const todayReport = await getTodayMorningReport();
   const unsentWorkout = await getUnsentWorkout();
   const todayWorkout = await getTodayWorkout(); 
   const stats = await getDashboardStats();
   const { morningAnalysis, workoutAnalysis } = await getLatestAnalyses(); 
 
-  // Akcja serwerowa wysłania treningu do AI
-  const triggerWorkoutAnalysis = async (formData: FormData) => {
-    'use server';
-    const trainingId = parseInt(formData.get('trainingId') as string, 10);
-    if (!isNaN(trainingId)) {
-      await sendWorkoutToAI(trainingId);
-    }
-  };
-
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-6 md:p-8">
       
       {/* GÓRNY PASEK SESJI I LOGOUT */}
-{/* GÓRNY PASEK SESJI I LOGOUT */}
-<div className="max-w-4xl mx-auto mb-6 flex flex-col sm:flex-row justify-between items-center gap-2 py-2.5 px-4 bg-slate-900/40 border border-slate-800/80 rounded-xl text-xs">
+      <div className="max-w-4xl mx-auto mb-6 flex flex-col sm:flex-row justify-between items-center gap-2 py-2.5 px-4 bg-slate-900/40 border border-slate-800/80 rounded-xl text-xs">
         <div className="flex items-center space-x-2">
           <span className="text-slate-400">Zalogowany jako:</span>
           <strong className="text-orange-500 font-bold">{nazwaZalogowanego}</strong>
           <span className="text-slate-500">({user.email})</span>
         </div>
-        <div className="flex items-center gap-2"> {/* Kontener grupujący przyciski */}
+        <div className="flex items-center gap-2">
           <ProfileSettingsModal 
             initialData={{
               imie: profile?.imie || '',
@@ -130,10 +118,10 @@ const { data: profile } = await supabase
         {glownaDyscyplina !== 'Marsz/Spacer' && glownaDyscyplina !== 'Senior' && <StravaSyncButton />}
       </div>
 
-      {/* GŁÓWNY, WYŚRODKOWANY UKŁAD JEDNOKOLUMNOWY */}
+      {/* GŁÓWNY UKŁAD */}
       <div className="max-w-4xl mx-auto space-y-8">
         
-        {/* 1. STATYSTYKI Z 30 DNI (Kompaktowe) */}
+        {/* 1. STATYSTYKI Z 30 DNI */}
         <section className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
@@ -168,10 +156,9 @@ const { data: profile } = await supabase
           </div>
         </section>
 
-        {/* 2. DYNAMICZNY FORMULARZ PORANNY LUB RAPORT */}
+        {/* 2. RAPORT PORANNY */}
         <section className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative">
           {todayReport ? (
-            // WIDOK ZABLOKOWANY (Raport gotowy)
             <div>
               <div className="flex justify-between items-center border-b border-slate-800 pb-4 mb-4">
                 <h2 className="text-lg font-bold text-emerald-400 flex items-center gap-2">
@@ -180,7 +167,6 @@ const { data: profile } = await supabase
                 <span className="text-xs text-slate-500">{todayReport.data}</span>
               </div>
 
-              {/* TUTAJ: Podsumowanie poranka po wysłaniu */}
               <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 mb-6 bg-slate-950 p-4 rounded-xl border border-slate-850 text-xs">
                 <div>
                   <span className="text-slate-500 block">Waga:</span>
@@ -236,7 +222,6 @@ const { data: profile } = await supabase
               )}
             </div>
           ) : (
-            // WIDOK ODBLOKOWANY (Formularz wpisywania)
             <div>
               <h2 className="text-lg font-bold text-slate-200 mb-2 flex items-center gap-2">
                 {naglowekFormularza}
@@ -246,8 +231,6 @@ const { data: profile } = await supabase
               </p>
 
               <form action={saveMorningReport} className="space-y-6">
-                
-                {/* SEKCJA 1: STAN BIOLOGICZNY */}
                 <div>
                   <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
                     📊 Stan Biologiczny (Z rana)
@@ -297,7 +280,6 @@ const { data: profile } = await supabase
                   </div>
                 </div>
 
-                {/* SEKCJA 2: ZAŁOŻENIA TRENINGOWE */}
                 <div>
                   <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
                     🎯 Twoje założenia na dzisiaj
@@ -328,17 +310,17 @@ const { data: profile } = await supabase
                       <label className="block text-xs font-semibold text-slate-400 mb-1.5">Sugerowana pora</label>
                       <select
                         name="preferowana_pora"
+                        defaultValue="popoludnie"
                         className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-slate-200 text-sm focus:outline-none focus:border-orange-500 cursor-pointer"
                       >
                         <option value="poranek">🌅 Rano (przed 12:00)</option>
-                        <option value="popoludnie" selected>☀️ Popołudnie (12:00 - 17:00)</option>
+                        <option value="popoludnie">☀️ Popołudnie (12:00 - 17:00)</option>
                         <option value="wieczor">🌙 Wieczór (po 17:00)</option>
                       </select>
                     </div>
                   </div>
                 </div>
 
-                {/* Samopoczucie i uwagi dla trenera */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 mb-1.5">Samopoczucie i uwagi dla Trenera (Opcjonalnie)</label>
                   <textarea 
@@ -357,39 +339,14 @@ const { data: profile } = await supabase
           )}
         </section>
 
-        {/* 3. NOWY TRENING ZE STRAVY DO ANALIZY */}
+        {/* 3. NOWY TRENING ZE STRAVY DO ANALIZY (UŻYWA INTERAKTYWNEGO KOMPONENTU TRAININGCARD) */}
         {unsentWorkout && !todayWorkout && glownaDyscyplina !== 'Marsz/Spacer' && glownaDyscyplina !== 'Senior' && (
-          <section className="bg-slate-900 border border-orange-900/40 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 bg-orange-600/15 text-orange-400 text-[10px] uppercase font-extrabold px-3 py-1.5 rounded-bl-xl tracking-wider">
-              Nowy trening ze Strava
-            </div>
-            <h2 className="text-lg font-bold text-orange-400 mb-2 flex items-center gap-2">
-              🚴‍♂️ Trening czeka na odprawę AI
-            </h2>
-            <p className="text-slate-400 text-xs mb-4">
-              Wykryliśmy nową aktywność z dnia {unsentWorkout.data}. Wyślij ją do Trenera, aby uzyskać pełną analizę.
-            </p>
-            
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-slate-950 p-4 rounded-xl border border-slate-850 mb-4 text-xs">
-              <div><span className="text-slate-500 block">Dyscyplina:</span><span className="font-bold text-slate-200 block text-sm mt-0.5">{unsentWorkout.rodzaj}</span></div>
-              <div><span className="text-slate-500 block">Dystans:</span><span className="font-bold text-slate-200 block text-sm mt-0.5">{unsentWorkout.dystans ? `${unsentWorkout.dystans} km` : '---'}</span></div>
-              <div><span className="text-slate-500 block">Czas trwania:</span><span className="font-bold text-slate-200 block text-sm mt-0.5">{unsentWorkout.czas_minuty} minut</span></div>
-              <div><span className="text-slate-500 block">Tętno śr.:</span><span className="font-bold text-slate-200 block text-sm mt-0.5">{unsentWorkout.tetno_srednie ? `${unsentWorkout.tetno_srednie} bpm` : '---'}</span></div>
-            </div>
-
-            <form action={triggerWorkoutAnalysis}>
-              <input type="hidden" name="trainingId" value={unsentWorkout.id} />
-              <button type="submit" className="w-full sm:w-auto bg-orange-600 hover:bg-orange-500 text-white font-bold py-2.5 px-6 rounded-lg text-sm transition-colors cursor-pointer">
-                🚀 Wyślij do odprawy AI
-              </button>
-            </form>
-          </section>
+          <TrainingCard workout={unsentWorkout} />
         )}
 
-{/* 4. OSTATNI WYGENEROWANY TRENING */}
-{todayWorkout && (
+        {/* 4. OSTATNI WYGENEROWANY TRENING */}
+        {todayWorkout && (
           <section className="bg-slate-900 border border-orange-900/30 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-            {/* Dynamiczna etykieta z datą treningu */}
             <div className="absolute top-0 right-0 bg-orange-600/10 text-orange-400 text-[10px] uppercase font-extrabold px-3 py-1.5 rounded-bl-xl tracking-wider">
               Trening z dnia {todayWorkout.data}
             </div>
@@ -406,12 +363,23 @@ const { data: profile } = await supabase
             </div>
 
             {todayWorkout.ai_analiza ? (
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-6">
-                <h3 className="text-sm font-bold text-slate-200 mb-4 flex items-center gap-2">
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-6 space-y-4">
+                <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
                   🎙️ Analiza Treningowa AI (Komentarz Trenera)
                 </h3>
                 <div className="text-sm text-slate-300 leading-relaxed whitespace-pre-line prose prose-invert max-w-none">
                   {todayWorkout.ai_analiza}
+                </div>
+
+                {/* Przycisk przejścia do pogłębionej dyskusji w czacie */}
+                <div className="pt-2 border-t border-slate-800/80">
+                  <a
+                    href="#trainer-chat"
+                    className="inline-flex items-center gap-2 text-xs text-orange-400 hover:text-orange-300 font-semibold py-1.5 px-3 rounded-lg bg-orange-500/10 border border-orange-500/20 hover:bg-orange-500/20 transition"
+                  >
+                    <span>💬</span>
+                    <span>Dyskutuj z trenerem o tym treningu na czacie &rarr;</span>
+                  </a>
                 </div>
               </div>
             ) : (
@@ -420,14 +388,13 @@ const { data: profile } = await supabase
           </section>
         )}
 
-        {/* 5. OSTATNIA AKTYWNOŚĆ (Dawne Archiwum - Zredukowane) */}
+        {/* 5. OSTATNIA AKTYWNOŚĆ */}
         {(workoutAnalysis || morningAnalysis) && (
           <section className="bg-slate-900/50 border border-slate-800/50 rounded-2xl p-6 shadow-sm">
             <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
               🕰️ Ostatnia zarchiwizowana aktywność
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              
               {workoutAnalysis && (
                 <div className="bg-slate-950/50 p-5 rounded-xl border border-slate-800/50">
                   <span className="text-[10px] uppercase font-bold text-orange-500/70 tracking-wider block mb-3">Ostatni Trening</span>
@@ -436,7 +403,6 @@ const { data: profile } = await supabase
                   </p>
                 </div>
               )}
-
               {morningAnalysis && (
                 <div className="bg-slate-950/50 p-5 rounded-xl border border-slate-800/50">
                   <span className="text-[10px] uppercase font-bold text-emerald-500/70 tracking-wider block mb-3">Ostatni Poranek</span>
@@ -445,12 +411,11 @@ const { data: profile } = await supabase
                   </p>
                 </div>
               )}
-
             </div>
           </section>
         )}
 
-      </div> {/* Zamknięcie głównego kontenera space-y-8 */}
+      </div>
 
       <TrainerChat />
     </main>
