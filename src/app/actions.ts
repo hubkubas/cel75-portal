@@ -23,7 +23,7 @@ export interface OnboardingState {
 }
 
 // ==========================================
-// FUNKCJE POMOCNICZE I ODPORNOŚĆ AI (SMART FALLBACK)
+// FUNKCJE POMOCNICZE I PANCERNY FALLBACK AI (GEMINI + GROQ 100% FREE)
 // ==========================================
 
 function getWarsawDateString(): string {
@@ -37,7 +37,7 @@ function getWarsawDateString(): string {
 
 /**
  * PANCERNY I W 100% DARMOWY SILNIK AI
- * Kolejność: Gemini 2.5 Flash -> Gemini 2.0 Flash -> Groq (Llama 3.3 70B - 100% Free)
+ * Kolejność: Gemini 2.5 Flash -> Gemini 2.0 Flash -> Groq (Llama 3.3 70B - 100% darmowy)
  */
 async function callGeminiWithFallback(
   systemInstruction: string,
@@ -47,7 +47,7 @@ async function callGeminiWithFallback(
   const geminiKey = process.env.GEMINI_API_KEY;
   const groqKey = process.env.GROQ_API_KEY;
 
-  // 1. NAJPIERW PRÓBUJEMY DARMOWEGO GEMINI
+  // 1. KROK 1: PRÓBA WYWOŁANIA DARMOWEGO GEMINI (Google AI Studio)
   if (geminiKey) {
     const geminiModels = ['gemini-2.5-flash', 'gemini-2.0-flash'];
     const contents = customContents || [{ role: "user", parts: [{ text: promptText || "" }] }];
@@ -75,17 +75,16 @@ async function callGeminiWithFallback(
           }
         }
       } catch (e) {
-        console.warn(`[Gemini Free] Błąd z modelem ${model}, sprawdzam kolejne opcje...`);
+        console.warn(`[Gemini Free] Błąd z modelem ${model}, przełączam na kolejny...`);
       }
     }
   }
 
-  // 2. JEŚLI GEMINI JEST ZAJĘTE/PRZECIĄŻONE -> RATUJE NAS DARMOWY GROQ (Llama 3.3 70B)
+  // 2. KROK 2: DARMOWY RATUNEK GROQ (Llama 3.3 70B Versatile)
   if (groqKey) {
     try {
-      console.log("[AI Fallback] Przełączam na darmowy silnik Groq (Llama 3.3 70B)...");
+      console.log("[AI Fallback] Gemini zajęte. Natychmiastowe przełączenie na Groq (Llama 3.3 70B)...");
 
-      // Konwersja historii wiadomości na format OpenAI/Groq
       let messages: any[] = [{ role: "system", content: systemInstruction }];
 
       if (customContents && customContents.length > 0) {
@@ -129,7 +128,7 @@ async function callGeminiWithFallback(
     }
   }
 
-  throw new Error("Wszystkie darmowe serwery AI (Gemini i Groq) są chwilowo niedostępne. Spróbuj za chwilę.");
+  throw new Error("Wszystkie darmowe serwery AI są chwilowo zajęte. Spróbuj ponownie za kilkanaście sekund.");
 }
 
 // ==========================================
@@ -465,7 +464,7 @@ export async function getRecentWorkouts(): Promise<any[]> {
 }
 
 // ==========================================
-// IV. MULTIMEDIALNY CZAT Z TRENEREM AI
+// IV. MULTIMEDIALNY CZAT Z TRENEREM AI (Z PAMIĘCIĄ TRENINGÓW)
 // ==========================================
 
 export async function getChatHistory(): Promise<Message[]> {
@@ -473,7 +472,12 @@ export async function getChatHistory(): Promise<Message[]> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const { data, error } = await supabase.from('czat_wiadomosci').select('*').eq('user_id', user.id).order('created_at', { ascending: true });
+  const { data, error } = await supabase
+    .from('czat_wiadomosci')
+    .select('*')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: true });
+
   if (error) console.error("Błąd getChatHistory:", error);
   return (data as Message[]) || [];
 }
@@ -493,15 +497,30 @@ export async function sendChatMessage(content: string, imageBase64?: string): Pr
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Brak autoryzacji do wysłania wiadomości." };
 
-    await supabase.from('czat_wiadomosci').insert([{ user_id: user.id, rola: 'user', tresc: content, obrazek_base64: imageBase64 || null }]);
+    // 1. Zapisujemy wiadomość użytkownika do bazy
+    await supabase.from('czat_wiadomosci').insert([{ 
+      user_id: user.id, 
+      rola: 'user', 
+      tresc: content, 
+      obrazek_base64: imageBase64 || null 
+    }]);
 
     const dzis = getWarsawDateString();
+    
+    // 2. Pobieramy profil, raport poranny i ostatnie treningi
     const { data: profile } = await supabase.from('profile').select('*').eq('id', user.id).maybeSingle();
     const { data: todayReport } = await supabase.from('poranki').select('*').eq('user_id', user.id).eq('data', dzis).maybeSingle();
-    const { data: todayWorkout } = await supabase.from('treningi').select('*').eq('user_id', user.id).eq('data', dzis).maybeSingle();
+    
+    const { data: recentWorkouts } = await supabase
+      .from('treningi')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('data', { ascending: false })
+      .limit(3);
 
+    // 3. Pobieramy historię czatu (ograniczamy do 6 wiadomości dla optymalizacji darmowego tieru)
     const history = await getChatHistory();
-    const last10Messages = history.slice(-6);
+    const lastMessages = history.slice(-6);
 
     const imie = profile?.imie || 'zawodnik';
     const wiek = profile?.wiek || '';
@@ -509,27 +528,43 @@ export async function sendChatMessage(content: string, imageBase64?: string): Pr
     const celWagowy = profile?.cel_wagowy || 'Utrzymanie wagi';
     const celeSportowe = profile?.cele_sportowe || 'Zdrowie';
     const zone2 = profile?.strefy_tetna?.zone2 || { min: 105, max: 115 };
+    const targetCadence = profile?.strefy_tetna?.kadencja_target || 90;
+
+    // Budujemy czytelny kontekst ostatnich jednostek treningowych
+    const formattedWorkoutsContext = recentWorkouts && recentWorkouts.length > 0
+      ? recentWorkouts.map((t, i) => `
+        --- TRENING #${i + 1} (Data: ${t.data}, Dyscyplina: ${t.rodzaj}) ---
+        - Dystans: ${t.dystans || 0} km | Czas trwania: ${t.czas_minuty || 0} min
+        - Tętno śr: ${t.tetno_srednie || 'brak'} bpm (Max: ${t.tetno_max || 'brak'} bpm)
+        - Kadencja śr: ${t.kadencja_srednia || 'brak'} RPM
+        - Pogoda: ${t.weather_temp !== null ? `${t.weather_temp}°C, wiatr ${t.weather_wind_speed} km/h` : 'brak danych pogodowych'}
+        - TWOJA WCZEŚNIEJSZA ANALIZA TEGO TRENINGU: "${t.ai_analiza || 'Brak wcześniejszej analizy'}"
+      `).join('\n')
+      : 'Brak zarejestrowanych jednostek treningowych w ostatnim czasie.';
 
     const dynamicChatInstruction = `
-      Jesteś tym samym Osobistym Trenerem AI. 
+      Jesteś Osobistym Trenerem AI i Fizjologiem Sportu (styl dr. Iñigo San-Millána).
+      
       === PROFIL ZAWODNIKA ===
-      - Wiek: ${wiek} lat
+      - Imię: ${imie}, Wiek: ${wiek} lat
       - Główna dyscyplina: ${glownaDyscyplina}
       - Cel sportowy: ${celeSportowe}
       - Cel wagowy: ${celWagowy}
-      - Strefa 2 (Zone 2) tętna: ${zone2.min}-${zone2.max} bpm
+      - Strefa 2 (Zone 2) tętna: ${zone2.min}-${zone2.max} bpm (Kadencja: ${targetCadence}+ RPM)
 
-      === AKTUALNY STAN BIOLOGICZNY NA DZIŚ (${dzis}) ===
-      ${todayReport ? `Waga rano: ${todayReport.waga} kg, HRV: ${todayReport.hrv} ms, Sen: ${todayReport.jakosc_snu}/100. Analiza rano: "${todayReport.ai_analiza}"` : '- Brak raportu porannego.'}
+      === STAN BIOLOGICZNY NA DZIŚ (${dzis}) ===
+      ${todayReport ? `Waga rano: ${todayReport.waga} kg, HRV: ${todayReport.hrv} ms, Jakość snu: ${todayReport.jakosc_snu}/100. Twoja poranna odprawa: "${todayReport.ai_analiza}"` : '- Brak raportu porannego z dzisiaj.'}
 
-      === AKTUALNY TRENING NA DZIŚ (${dzis}) ===
-      ${todayWorkout ? `Dystans: ${todayWorkout.dystans} km, Tętno: ${todayWorkout.tetno_srednie} bpm. Analiza treningu: "${todayWorkout.ai_analiza}"` : '- Brak treningu.'}
+      === OSTATNIE JEDNOSTKI TRENINGOWE I TWOJE WCZEŚNIEJSZE ANALIZY ===
+      ${formattedWorkoutsContext}
 
-      Odpowiadaj z pasją, merytorycznie, motywująco. OPRZYJ SIĘ na powyższych danych z dzisiaj!
+      === KATEGORYCZNE ZASADY PROWADZENIA ROZMOWY ===
+      1. ZAWSZE ODNOSIĆ SIĘ DO FAKTÓW I LICZB: Jeśli zawodnik pyta o miniony trening, ból mięśni, tętno, tempo czy dietę po treningu – odnoś się do konkretnych wartości z powyższych treningów.
+      2. Odpowiadaj zwięźle, profesjonalnie, z motywującą pasją i kolarskim duchem.
     `;
 
-    const contents = last10Messages.map((msg, index) => {
-      const isLast = index === last10Messages.length - 1;
+    const contents = lastMessages.map((msg, index) => {
+      const isLast = index === lastMessages.length - 1;
       const parts: any[] = [{ text: msg.tresc }];
       if (isLast && msg.rola === 'user' && msg.obrazek_base64) {
         const mimeType = msg.obrazek_base64.split(';')[0].split(':')[1];
@@ -655,7 +690,7 @@ export async function sendWorkoutToAI(trainingId: number, userComment: string = 
 }
 
 /**
- * Akcja wywoływana bezpośrednio z komponentu TrainingCard (zwraca tekst analizy i aktualizuje bazę)
+ * Akcja wywoływana bezpośrednio z komponentu TrainingCard (zwraca tekst analizy)
  */
 export async function analyzeTrainingAction(training: any, userComment: string = ""): Promise<string> {
   try {
@@ -670,7 +705,6 @@ export async function analyzeTrainingAction(training: any, userComment: string =
         return `⚠️ Nie udało się przeprowadzić pełnej analizy: ${result.error}`;
       }
 
-      // Pobierz zapisaną analizę z bazy
       const { data } = await supabase
         .from('treningi')
         .select('ai_analiza')
@@ -683,7 +717,6 @@ export async function analyzeTrainingAction(training: any, userComment: string =
       }
     }
 
-    // Fallback: jeśli przekazano sam obiekt bez zapisanego rekordu w bazie
     const prompt = `
       Przeanalizuj trening:
       Nazwa: ${training["Nazwa Treningu"] || training.nazwa || 'Trening'}

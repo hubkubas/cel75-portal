@@ -106,10 +106,29 @@ export default function TrainingCard({ training }: { training: any }) {
 
       {/* Odpowiedź trenera AI */}
       {analysis && (
-        <div className="mt-4 p-4 bg-blue-950/30 border border-blue-800/60 rounded-lg text-blue-200 text-sm leading-relaxed whitespace-pre-wrap">
-          {analysis}
-        </div>
-      )}
+  <div className="mt-4 space-y-3">
+    <div className="p-4 bg-blue-950/30 border border-blue-800/60 rounded-lg text-blue-200 text-sm leading-relaxed whitespace-pre-wrap">
+      {analysis}
+    </div>
+
+    {/* Przycisk przejścia do pogłębionej dyskusji na czacie */}
+    <a
+      href="#trainer-chat"
+      onClick={() => {
+        // Opcjonalnie: można ustawić fokus na polu czatu
+        const chatInput = document.querySelector('textarea, input[type="text"]') as HTMLInputElement;
+        if (chatInput) {
+          chatInput.value = `Trenerze, odnośnie treningu z ${training["Data"] || training.data} (${training["Nazwa Treningu"] || ''}): `;
+          chatInput.focus();
+        }
+      }}
+      className="inline-flex items-center gap-2 text-xs text-amber-400 hover:text-amber-300 font-medium py-1 px-2 rounded bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 transition"
+    >
+      <span>💬</span>
+      <span>Dopytaj trenera o szczegóły tej jednostki na czacie &rarr;</span>
+    </a>
+  </div>
+)}
     </div>
   );
 }
